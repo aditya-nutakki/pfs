@@ -7,6 +7,7 @@ import os
 from sklearn.model_selection import train_test_split
 from PIL import Image
 import cv2
+from utils import *
 
 s = 7 # divide image into s x s grid
 b = 2 # number of bounding boxes
@@ -18,11 +19,63 @@ lambda_coord, lambda_noobj = 5, 0.5
 class YOLOLoss(nn.Module):
     def __init__(self) -> None:
         super().__init__()
+
+    def _get_bbox(self, pred):
+        # pred contains elements only up to the b*5 elements
+
+        # if you want to count in conditional probability, then argmax(class_probabilities) * Pc -> return this max value's bounding box
+        bboxes = []
+        objectness_scores = []
+        for i in range(b):
+            bboxes.append(pred[i*5 : (i + 1)*5].tolist())
+            objectness_scores.append(pred[i*5].tolist())
+        # print(f"_get_bbox boxes => {bboxes}, len => {len(bboxes)}")
+        bboxes = torch.tensor(bboxes)
+        objectness_scores = torch.tensor(objectness_scores)
+        print(bboxes, bboxes.shape)
+        vals, idx = torch.max(bboxes[:, 0], dim = 0)
+        return bboxes[idx], objectness_scores
     
-    def forward(self, preds, target):
-        # preds and target to be in the shape of (_, s, s, (5*b) + c)
-        loss = 0
+
+    
+
+
+    def forward(self, preds, targets):
+        # preds and target to be in the shape of (-1, s, s, (5*b) + c)
+        obj_loss, noobj_loss = 0, 0
+        
+        for k, (pred, target) in enumerate(zip(preds, targets)):
+            s = pred.shape[0]
+            
+            for i in range(s):
+                for j in range(s):
+                    # print(f"bboxes are => {pred[i, j, :b*5]}, shape => {pred[i, j, :b*5].shape}")
+                    best_bbox, objectness_scores = self._get_bbox(pred[i, j, :b*5])
+                    # print(f"best_bbox => {best_bbox}")
+                    c_p, x_p, y_p, w_p, h_p = best_bbox.tolist()
+                    c, x, y, w, h = target[i, j, :].tolist()
+                    target_format_pred = torch.cat([best_bbox, pred[i, j, b*5:]])
+                    # print(f"normal pred => {target_format_pred}; shape => {target_format_pred.shape}, target_shape => {target[i,j, :]}; shape=> {target[i,j,:].shape}")
+
+                    if c == 1:
+                        # ground truth has object
+                        box_loss = F.mse_loss(best_bbox[1], target[1]) + F.mse_loss(best_bbox[2], target[2]) + F.mse_loss(torch.sqrt(best_bbox[3]), torch.sqrt(target[3])) + F.mse_loss(torch.sqrt(best_bbox[4]), torch.sqrt(target[4]))
+                        pc_loss = F.mse_loss(best_bbox[0], target[0])
+                        class_loss = F.mse_loss(target_format_pred[i, j, 5:], target[i, j, 5:])
+                        obj_loss += lambda_coord*class_loss + pc_loss + box_loss
+
+                    else:
+                        # ground truth does not have object
+                        no_obj_loss += lambda_noobj*torch.sum(objectness_scores**2) # since we would be subtracting with 0 and then squaring it, its the same as squaring and summing it
+
+                    break
+                break
+                loss = obj_loss + noobj_loss
+
         return loss
+
+
+
 
 
 class TrafficDataset(Dataset):
@@ -84,7 +137,7 @@ class TrafficDataset(Dataset):
         with open(annotation, "r") as f:
             _labels = [l.strip().replace("\n", "") for l in f.readlines() if l]
         _labels = self._cvt_annot(_labels)
-        print(_labels)
+        # print(_labels)
         # labels = torch.zeros((s, s, b*5 + nc))
         labels = torch.zeros((s, s, 5 + nc))
         
@@ -94,7 +147,7 @@ class TrafficDataset(Dataset):
             x_cell, y_cell = int(xc/self.len_per_cell), int(yc/self.len_per_cell)
             new_x, new_y = (xc - x_cell*self.len_per_cell)/self.len_per_cell, (yc - y_cell*self.len_per_cell)/self.len_per_cell # calculating relative distance from the grid
 
-            labels[x_cell, y_cell, :5] = torch.tensor([1.0, new_x, new_y, w, h]) # is of shape [Pc, x, y, w, h, c1, c2 ... cn]
+            labels[x_cell, y_cell, :5] = torch.tensor([1.0, new_x, new_y, w, h]) # is of shape [Pc, x, y, w, h]
             labels[x_cell, y_cell, 5 + int(class_)] = torch.tensor(1.0)
 
         return labels
@@ -114,7 +167,7 @@ class TrafficDataset(Dataset):
         # return super().__getitem__(index)
     
 
-class Model(nn.Module):
+class YOLO(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.conv7x7 = nn.Conv2d(in_channels = 3, out_channels = 64, kernel_size=7, stride=2, padding = 3)
@@ -185,20 +238,54 @@ class Model(nn.Module):
         x = F.leaky_relu(self.linear1(x))
         x = F.relu(self.linear2(x))
         
-        x = x.view((s,s,-1))
+        x = x.view((-1, s, s, 5*b + nc))
 
         return x
 
 
 
 
+def train(model, train_dataloader):
+    device = "cuda"
+    model = model.to(device)
+    criterion = YoloLoss()
+    opt = torch.optim.Adam(model.parameters(), lr = 10e-4)
+
+
+    for e in range(10):
+        print(f"Training on epoch {e} ...")
+        for i, (image, label) in enumerate(train_dataloader):
+            model.train()
+
+            opt.zero_grad()
+            image, label = image.to(device), label.to(device)
+
+            preds = model(image)
+            loss = criterion(preds, label)
+            loss.backward()
+            opt.step()
+
+            if i%50 == 0:
+                print(f"loss on epoch {e}; step {i} => {loss}")
+
+
+def test_loss(labels):
+    crit = YOLOLoss()
+    preds = torch.randn(4, s, s, 5*b + nc) # output
+    loss = crit(preds, labels)
+
+
+
 if __name__ == "__main__":
     # x = torch.randn(img_dims).unsqueeze(dim = 0)
-    # model = Model()
+    # model = YOLO()
     # y = model(x)
     # print(y.shape)
-    ds = TrafficDataset()
-    # print(ds[1])
-    img, ann = ds[3]
-    print(img.shape, ann.shape)
-    print(ann)
+
+    train_ds = TrafficDataset()
+    # _, annot = train_ds[3]
+    train_loader = DataLoader(train_ds, batch_size = 4, shuffle=True)
+    for _, labels in train_loader:
+        test_loss(labels)
+        break
+    # train(model, train_loader)
