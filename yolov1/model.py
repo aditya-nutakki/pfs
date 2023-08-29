@@ -8,6 +8,8 @@ from sklearn.model_selection import train_test_split
 from PIL import Image
 import cv2
 from utils import *
+import time
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 s = 7 # divide image into s x s grid
 b = 2 # number of bounding boxes
@@ -15,6 +17,11 @@ nc = 4 # number of classes
 img_dims = (3, 448, 448) # c, h, w
 
 lambda_coord, lambda_noobj = 5, 0.5
+
+
+save_dir = "./output/"
+os.makedirs(save_dir, exist_ok=True)
+
 
 class YOLOLoss(nn.Module):
     def __init__(self) -> None:
@@ -70,7 +77,7 @@ class YOLOLoss(nn.Module):
                         no_obj_loss += lambda_noobj*torch.sum(objectness_scores**2) # since we would be subtracting with 0 and then squaring it, its the same as squaring and summing it
 
                 loss = obj_loss + no_obj_loss
-
+        # print(loss)
         return loss
 
 
@@ -213,8 +220,9 @@ class YOLO(nn.Module):
         )
 
         self.flatten = nn.Flatten()
-        self.linear1 = nn.Linear(1024*7*7, 4096)
-        self.linear2 = nn.Linear(4096, s*s*(b*5 + nc))
+        self.linear1 = nn.Linear(1024*7*7, 1024) # using 1024 instead of 4096 because model cant train on my 3060 notebook GPU (6GB)
+        self.dropout = nn.Dropout(0.25)
+        self.linear2 = nn.Linear(1024, s*s*(b*5 + nc))
 
 
 
@@ -235,6 +243,7 @@ class YOLO(nn.Module):
 
         x = self.flatten(x)
         x = F.leaky_relu(self.linear1(x))
+        x = self.dropout(x)
         x = F.relu(self.linear2(x))
         
         x = x.view((-1, s, s, 5*b + nc))
@@ -242,31 +251,51 @@ class YOLO(nn.Module):
         return x
 
 
-
-
 def train(model, train_dataloader):
     device = "cuda"
     model = model.to(device)
-    criterion = YoloLoss()
-    opt = torch.optim.Adam(model.parameters(), lr = 10e-4)
+    print(f"training on a model with {sum(p.numel() for p in model.parameters())} parameters") # 112,240,366 params
+    criterion = YOLOLoss()
+    opt = torch.optim.Adam(model.parameters(), lr = 10e-6)
+
+    # cosine_lr = CosineAnnealingLR(opt, 100*300)
 
 
-    for e in range(10):
+    print("Starting to train !")
+    torch.cuda.empty_cache()
+    min_loss = 9999
+
+    for e in range(120):
+        stime = time.time()
+        losses = []
+        model_save_path = os.path.join(save_dir, f"model_{e}.pt")
         print(f"Training on epoch {e} ...")
+        model.train()
         for i, (image, label) in enumerate(train_dataloader):
-            model.train()
-
+          
             opt.zero_grad()
             image, label = image.to(device), label.to(device)
 
             preds = model(image)
             loss = criterion(preds, label)
+            losses.append(loss.item())
             loss.backward()
             opt.step()
 
-            if i%50 == 0:
+            if i%100 == 0:
                 print(f"loss on epoch {e}; step {i} => {loss}")
-
+        
+        ftime = time.time()
+        avg_loss = sum(losses)/len(losses)
+        # print(f"loss => {sum(losses)}; len => {len(losses)}")
+        print(f"Avg epoch loss at epoch {e} => {round(avg_loss, 4)}; time taken => {round(ftime-stime, 2)}s")
+        
+        if avg_loss <= min_loss:
+            min_loss = avg_loss
+            print(f"saving model at {model_save_path} ...")  
+            torch.save(model.state_dict(), model_save_path)
+            print(f"saved for epoch {e}")
+        print()    
 
 def test_loss(labels):
     crit = YOLOLoss()
@@ -278,14 +307,17 @@ def test_loss(labels):
 
 if __name__ == "__main__":
     # x = torch.randn(img_dims).unsqueeze(dim = 0)
-    # model = YOLO()
+    device = "cuda"
+    model = YOLO().to(device)
     # y = model(x)
     # print(y.shape)
+    load_model = False
+
+    if load_model:
+        model.load_state_dict(torch.load("./output/model_old.pt"))
+        print(f"loaded pretrained model")
 
     train_ds = TrafficDataset()
-    # _, annot = train_ds[3]
-    train_loader = DataLoader(train_ds, batch_size = 3, shuffle=False)
-    for _, labels in train_loader:
-        print(test_loss(labels))
+    train_loader = DataLoader(train_ds, batch_size = 4, shuffle=True)
         
-    # train(model, train_loader)
+    train(model, train_loader)
