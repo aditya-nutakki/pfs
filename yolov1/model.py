@@ -10,6 +10,7 @@ import cv2
 from utils import *
 import time
 from torch.optim.lr_scheduler import CosineAnnealingLR
+import numpy as np
 
 s = 7 # divide image into s x s grid
 b = 2 # number of bounding boxes
@@ -65,7 +66,8 @@ class YOLOLoss(nn.Module):
 
                     if c == 1:
                         # ground truth has object
-                        box_loss = F.mse_loss(best_bbox[1], target[i, j, 1]) + F.mse_loss(best_bbox[2], target[i, j, 2]) + F.mse_loss(torch.sqrt(best_bbox[3]), torch.sqrt(target[i, j, 3])) + F.mse_loss(torch.sqrt(best_bbox[4]), torch.sqrt(target[i, j, 4]))
+                        # box_loss = F.mse_loss(best_bbox[1], target[i, j, 1]) + F.mse_loss(best_bbox[2], target[i, j, 2]) + F.mse_loss(torch.sqrt(best_bbox[3]), torch.sqrt(target[i, j, 3])) + F.mse_loss(torch.sqrt(best_bbox[4]), torch.sqrt(target[i, j, 4]))
+                        box_loss = F.mse_loss(best_bbox[1], target[i, j, 1]) + F.mse_loss(best_bbox[2], target[i, j, 2]) + F.mse_loss(best_bbox[3], target[i, j, 3]) + F.mse_loss(best_bbox[4], target[i, j, 4])
                         pc_loss = F.mse_loss(best_bbox[0], target[i, j, 0])
                         # print(target_format_pred[5:], target_format_pred[5:].shape)
                         # print(target[i, j, 5:], target[i, j, 5:].shape)
@@ -81,8 +83,18 @@ class YOLOLoss(nn.Module):
         return loss
 
 
+class YOLOLossV2(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
 
+    def mse_loss(self, input, target):
+        return torch.sum((input - target) ** 2)
 
+    def weighted_mse_loss(self, input, target, weight):
+        return torch.sum(weight * (input - target) ** 2)
+
+    def forward(self, preds, targets):
+        return 
 
 class TrafficDataset(Dataset):
     def __init__(self, base_path = "/mnt/d/work/datasets/traffic_set/ts", txt_path = "../train.txt") -> None:
@@ -93,8 +105,8 @@ class TrafficDataset(Dataset):
         
         self.transforms = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Resize(size=(img_dims[1], img_dims[2])),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+            transforms.Resize(size=(img_dims[1], img_dims[2]))
+            # transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
         ])
 
         self.len_per_cell = 1/s
@@ -167,6 +179,7 @@ class TrafficDataset(Dataset):
         # both are just paths, need to do some preproessing before returning this
         # image = self.transforms(Image.open(image))
         image = self.transforms(cv2.imread(image))
+        print(f"getting annotations from {annotation}")
         annotation = self._create_gt(annotation)
 
         return image, annotation
@@ -282,19 +295,20 @@ def train(model, train_dataloader):
             loss.backward()
             opt.step()
 
-            if i%100 == 0:
+            if i%25 == 0:
                 print(f"loss on epoch {e}; step {i} => {loss}")
+                print(torch.count_nonzero(preds))
         
         ftime = time.time()
         avg_loss = sum(losses)/len(losses)
         # print(f"loss => {sum(losses)}; len => {len(losses)}")
         print(f"Avg epoch loss at epoch {e} => {round(avg_loss, 4)}; time taken => {round(ftime-stime, 2)}s")
         
-        if avg_loss <= min_loss:
-            min_loss = avg_loss
-            print(f"saving model at {model_save_path} ...")  
-            torch.save(model.state_dict(), model_save_path)
-            print(f"saved for epoch {e}")
+        # if avg_loss <= min_loss:
+        #     min_loss = avg_loss
+        #     print(f"saving model at {model_save_path} ...")  
+        #     torch.save(model.state_dict(), model_save_path)
+        #     print(f"saved for epoch {e}")
         print()    
 
 def test_loss(labels):
@@ -305,19 +319,64 @@ def test_loss(labels):
     return loss
 
 
+def get_x1y1x2y2(xc, yc, w, h):
+    return int(xc-w/2), int(yc-h/2), int(xc+w/2), int(yc+h/2)
+
+
+
+def vis(image, xc, yc, w, h, i, j):
+    image = image.permute(1, 2, 0)
+    image = image.detach().cpu().numpy()
+    w, h = int(w * img_dims[1]), int(h * img_dims[2])
+    xc = int(img_dims[1]*((i+xc)/s))
+    yc = int(img_dims[2]*((j+yc)/s))
+    # print(xc, yc, w, h)
+    x1, y1, x2, y2 = get_x1y1x2y2(xc, yc, w, h)
+    # print(x1, y1, x2, y2)
+    image = image*255
+    image = np.ascontiguousarray(image, dtype=np.uint8)
+    print(image.shape, type(image))
+    # image = cv2.rectangle(image, (x1, y1), (x2, y2), color=(255, 0, 255), thickness=2)
+    image = cv2.rectangle(image, (x1, y1), (x2, y2), (128, 128, 0), 2)
+    cv2.imshow("vis", image)
+    cv2.waitKey(0)
+
+
+
+def decode_preds(images, targets):
+    # targets to be in the shape of (-1, s, s 5*b + nc)
+    found = False
+    for image, target in zip(images, targets):
+        for i in range(s):
+            for j in range(s):
+                cell = target[i, j, :5]
+                pc, xc, yc, w, h = cell
+                if pc > 0.01:
+                    print("visualising ...")
+                    vis(image, xc, yc, w, h, i, j)
+                    
+
+
 if __name__ == "__main__":
-    # x = torch.randn(img_dims).unsqueeze(dim = 0)
+    # x = torch.randn(4, 3, 448, 448)
     device = "cuda"
     model = YOLO().to(device)
     # y = model(x)
+    
     # print(y.shape)
     load_model = False
 
     if load_model:
         model.load_state_dict(torch.load("./output/model_old.pt"))
+        model.to(device)
         print(f"loaded pretrained model")
 
     train_ds = TrafficDataset()
     train_loader = DataLoader(train_ds, batch_size = 4, shuffle=True)
-        
-    train(model, train_loader)
+    # 2744 total number of elements at output
+    # train(model, train_loader)
+    for images, targets in train_loader:
+        images = images.to(device)
+        preds = model(images)
+        decode_preds(images, preds)
+        break
