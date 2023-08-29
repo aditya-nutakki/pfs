@@ -32,17 +32,14 @@ class YOLOLoss(nn.Module):
         # print(f"_get_bbox boxes => {bboxes}, len => {len(bboxes)}")
         bboxes = torch.tensor(bboxes)
         objectness_scores = torch.tensor(objectness_scores)
-        print(bboxes, bboxes.shape)
+        # print(bboxes, bboxes.shape)
         vals, idx = torch.max(bboxes[:, 0], dim = 0)
         return bboxes[idx], objectness_scores
     
 
-    
-
-
     def forward(self, preds, targets):
         # preds and target to be in the shape of (-1, s, s, (5*b) + c)
-        obj_loss, noobj_loss = 0, 0
+        obj_loss, no_obj_loss = 0, 0
         
         for k, (pred, target) in enumerate(zip(preds, targets)):
             s = pred.shape[0]
@@ -51,26 +48,28 @@ class YOLOLoss(nn.Module):
                 for j in range(s):
                     # print(f"bboxes are => {pred[i, j, :b*5]}, shape => {pred[i, j, :b*5].shape}")
                     best_bbox, objectness_scores = self._get_bbox(pred[i, j, :b*5])
+                    best_bbox, objectness_scores = best_bbox.to("cuda"), objectness_scores.to("cuda")
                     # print(f"best_bbox => {best_bbox}")
-                    c_p, x_p, y_p, w_p, h_p = best_bbox.tolist()
-                    c, x, y, w, h = target[i, j, :].tolist()
+                    # c_p, x_p, y_p, w_p, h_p = best_bbox.tolist()
+                    # print(target[i, j, :].tolist())
+                    c = target[i, j, :].tolist()[0]
                     target_format_pred = torch.cat([best_bbox, pred[i, j, b*5:]])
                     # print(f"normal pred => {target_format_pred}; shape => {target_format_pred.shape}, target_shape => {target[i,j, :]}; shape=> {target[i,j,:].shape}")
 
                     if c == 1:
                         # ground truth has object
-                        box_loss = F.mse_loss(best_bbox[1], target[1]) + F.mse_loss(best_bbox[2], target[2]) + F.mse_loss(torch.sqrt(best_bbox[3]), torch.sqrt(target[3])) + F.mse_loss(torch.sqrt(best_bbox[4]), torch.sqrt(target[4]))
-                        pc_loss = F.mse_loss(best_bbox[0], target[0])
-                        class_loss = F.mse_loss(target_format_pred[i, j, 5:], target[i, j, 5:])
-                        obj_loss += lambda_coord*class_loss + pc_loss + box_loss
+                        box_loss = F.mse_loss(best_bbox[1], target[i, j, 1]) + F.mse_loss(best_bbox[2], target[i, j, 2]) + F.mse_loss(torch.sqrt(best_bbox[3]), torch.sqrt(target[i, j, 3])) + F.mse_loss(torch.sqrt(best_bbox[4]), torch.sqrt(target[i, j, 4]))
+                        pc_loss = F.mse_loss(best_bbox[0], target[i, j, 0])
+                        # print(target_format_pred[5:], target_format_pred[5:].shape)
+                        # print(target[i, j, 5:], target[i, j, 5:].shape)
+                        class_loss = F.mse_loss(target_format_pred[5:], target[i, j, 5:])
+                        obj_loss += lambda_coord*box_loss + pc_loss + class_loss
 
                     else:
                         # ground truth does not have object
                         no_obj_loss += lambda_noobj*torch.sum(objectness_scores**2) # since we would be subtracting with 0 and then squaring it, its the same as squaring and summing it
 
-                    break
-                break
-                loss = obj_loss + noobj_loss
+                loss = obj_loss + no_obj_loss
 
         return loss
 
@@ -271,9 +270,10 @@ def train(model, train_dataloader):
 
 def test_loss(labels):
     crit = YOLOLoss()
-    preds = torch.randn(4, s, s, 5*b + nc) # output
+    preds = torch.rand(3, s, s, 5*b + nc).to("cuda") # output
+    labels = labels.to("cuda")
     loss = crit(preds, labels)
-
+    return loss
 
 
 if __name__ == "__main__":
@@ -284,8 +284,8 @@ if __name__ == "__main__":
 
     train_ds = TrafficDataset()
     # _, annot = train_ds[3]
-    train_loader = DataLoader(train_ds, batch_size = 4, shuffle=True)
+    train_loader = DataLoader(train_ds, batch_size = 3, shuffle=False)
     for _, labels in train_loader:
-        test_loss(labels)
-        break
+        print(test_loss(labels))
+        
     # train(model, train_loader)
