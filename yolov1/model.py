@@ -7,10 +7,13 @@ import os
 from sklearn.model_selection import train_test_split
 from PIL import Image
 import cv2
-from utils import *
+# from utils import *
 import time
-from torch.optim.lr_scheduler import CosineAnnealingLR
 import numpy as np
+import torchshow as ts
+
+
+
 
 s = 7 # divide image into s x s grid
 b = 2 # number of bounding boxes
@@ -27,6 +30,7 @@ os.makedirs(save_dir, exist_ok=True)
 class YOLOLoss(nn.Module):
     def __init__(self) -> None:
         super().__init__()
+    
 
     def _get_bbox(self, pred):
         # pred contains elements only up to the b*5 elements
@@ -67,11 +71,11 @@ class YOLOLoss(nn.Module):
                     if c == 1:
                         # ground truth has object
                         # box_loss = F.mse_loss(best_bbox[1], target[i, j, 1]) + F.mse_loss(best_bbox[2], target[i, j, 2]) + F.mse_loss(torch.sqrt(best_bbox[3]), torch.sqrt(target[i, j, 3])) + F.mse_loss(torch.sqrt(best_bbox[4]), torch.sqrt(target[i, j, 4]))
-                        box_loss = F.mse_loss(best_bbox[1], target[i, j, 1]) + F.mse_loss(best_bbox[2], target[i, j, 2]) + F.mse_loss(best_bbox[3], target[i, j, 3]) + F.mse_loss(best_bbox[4], target[i, j, 4])
-                        pc_loss = F.mse_loss(best_bbox[0], target[i, j, 0])
+                        box_loss = F.mse_loss(best_bbox[1], target[i, j, 1], reduction="sum") + F.mse_loss(best_bbox[2], target[i, j, 2], reduction="sum") + F.mse_loss(best_bbox[3], target[i, j, 3], reduction="sum") + F.mse_loss(best_bbox[4], target[i, j, 4], reduction="sum")
+                        pc_loss = F.mse_loss(best_bbox[0], target[i, j, 0], reduction="sum")
                         # print(target_format_pred[5:], target_format_pred[5:].shape)
                         # print(target[i, j, 5:], target[i, j, 5:].shape)
-                        class_loss = F.mse_loss(target_format_pred[5:], target[i, j, 5:])
+                        class_loss = F.mse_loss(target_format_pred[5:], target[i, j, 5:], reduction="sum")
                         obj_loss += lambda_coord*box_loss + pc_loss + class_loss
 
                     else:
@@ -161,7 +165,7 @@ class TrafficDataset(Dataset):
         
         for l, _label in enumerate(_labels):
             class_, xc, yc, w, h = _label[0], _label[1], _label[2], _label[3], _label[4]
-
+            # print(class_, xc, yc, w, h)
             x_cell, y_cell = int(xc/self.len_per_cell), int(yc/self.len_per_cell)
             new_x, new_y = (xc - x_cell*self.len_per_cell)/self.len_per_cell, (yc - y_cell*self.len_per_cell)/self.len_per_cell # calculating relative distance from the grid
 
@@ -176,10 +180,14 @@ class TrafficDataset(Dataset):
     def __getitem__(self, index):
         image = self.images[index]
         annotation = self.annots[index]
+        # print(f"getting from {image} and {annotation}")
         # both are just paths, need to do some preproessing before returning this
-        # image = self.transforms(Image.open(image))
-        image = self.transforms(cv2.imread(image))
-        print(f"getting annotations from {annotation}")
+
+        # image = cv2.cvtColor(cv2.imread(image), cv2.COLOR_BGR2RGB)
+        image = cv2.imread(image)
+        image = self.transforms(image)
+
+        # print(f"getting annotations from {annotation}")
         annotation = self._create_gt(annotation)
 
         return image, annotation
@@ -197,6 +205,7 @@ class YOLO(nn.Module):
         self.module1 = nn.Sequential(
             nn.Conv2d(in_channels=192, out_channels=128, kernel_size=1),
             nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, padding = 1),
+            nn.BatchNorm2d(256),
             nn.Conv2d(in_channels=256, out_channels=256, kernel_size=1),
             nn.Conv2d(in_channels=256, out_channels=512, kernel_size=3, padding = 1)
         )
@@ -207,21 +216,24 @@ class YOLO(nn.Module):
 
             nn.Conv2d(in_channels= 512, out_channels=256, kernel_size=1),
             nn.Conv2d(in_channels= 256, out_channels=512, kernel_size=3, padding = 1),
-
+            nn.BatchNorm2d(512),
             nn.Conv2d(in_channels= 512, out_channels=256, kernel_size=1),
             nn.Conv2d(in_channels= 256, out_channels=512, kernel_size=3, padding = 1),
-
+            
+            nn.Dropout(0.2),
             nn.Conv2d(in_channels= 512, out_channels=256, kernel_size=1),
             nn.Conv2d(in_channels= 256, out_channels=512, kernel_size=3, padding = 1),
-
+            nn.BatchNorm2d(512),
             nn.Conv2d(in_channels= 512, out_channels=512, kernel_size=1),
             nn.Conv2d(in_channels= 512, out_channels=1024, kernel_size=3, padding = 1),
         )
 
         self.module3 = nn.Sequential(
             nn.Conv2d(in_channels= 1024, out_channels=512, kernel_size=1),
+            nn.Dropout(0.2),
             nn.Conv2d(in_channels= 512, out_channels=1024, kernel_size=3, padding = 1),
             nn.Conv2d(in_channels= 1024, out_channels=512, kernel_size=1),
+            nn.BatchNorm2d(512),
             nn.Conv2d(in_channels= 512, out_channels=1024, kernel_size=3, padding = 1),
             nn.Conv2d(in_channels= 1024, out_channels=1024, kernel_size=3, padding = 1),
             nn.Conv2d(in_channels= 1024, out_channels=1024, kernel_size=3, stride=2, padding = 1)
@@ -229,6 +241,7 @@ class YOLO(nn.Module):
 
         self.module4 = nn.Sequential(
             nn.Conv2d(in_channels= 1024, out_channels=1024, kernel_size=3, padding = 1),
+            nn.BatchNorm2d(1024),
             nn.Conv2d(in_channels= 1024, out_channels=1024, kernel_size=3, padding = 1)
         )
 
@@ -269,21 +282,18 @@ def train(model, train_dataloader):
     model = model.to(device)
     print(f"training on a model with {sum(p.numel() for p in model.parameters())} parameters") # 112,240,366 params
     criterion = YOLOLoss()
-    opt = torch.optim.Adam(model.parameters(), lr = 10e-6)
-
-    # cosine_lr = CosineAnnealingLR(opt, 100*300)
-
+    opt = torch.optim.Adam(model.parameters(), lr = 1e-5)
 
     print("Starting to train !")
     torch.cuda.empty_cache()
     min_loss = 9999
+    model_save_path = os.path.join(save_dir, f"model_best.pt")
 
-    for e in range(120):
+    for e in range(1200):
         stime = time.time()
         losses = []
-        model_save_path = os.path.join(save_dir, f"model_{e}.pt")
+        
         print(f"Training on epoch {e} ...")
-        model.train()
         for i, (image, label) in enumerate(train_dataloader):
           
             opt.zero_grad()
@@ -297,18 +307,22 @@ def train(model, train_dataloader):
 
             if i%25 == 0:
                 print(f"loss on epoch {e}; step {i} => {loss}")
-                print(torch.count_nonzero(preds))
         
         ftime = time.time()
         avg_loss = sum(losses)/len(losses)
         # print(f"loss => {sum(losses)}; len => {len(losses)}")
         print(f"Avg epoch loss at epoch {e} => {round(avg_loss, 4)}; time taken => {round(ftime-stime, 2)}s")
         
-        # if avg_loss <= min_loss:
-        #     min_loss = avg_loss
-        #     print(f"saving model at {model_save_path} ...")  
-        #     torch.save(model.state_dict(), model_save_path)
-        #     print(f"saved for epoch {e}")
+        if avg_loss <= min_loss:
+            min_loss = avg_loss
+            print(f"new best model at epoch {e} at {model_save_path} ...")  
+            torch.save(model.state_dict(), model_save_path)
+            print(f"saved for epoch {e}")
+
+        print(f"saving latest model at {model_save_path} ...")  
+        torch.save(model.state_dict(), )
+        model_save_path = os.path.join(save_dir, f"last.pt")
+        
         print()    
 
 def test_loss(labels):
@@ -325,19 +339,23 @@ def get_x1y1x2y2(xc, yc, w, h):
 
 
 def vis(image, xc, yc, w, h, i, j):
+    s = 7
+    len_per_cell = 1/s
+
     image = image.permute(1, 2, 0)
     image = image.detach().cpu().numpy()
     w, h = int(w * img_dims[1]), int(h * img_dims[2])
-    xc = int(img_dims[1]*((i+xc)/s))
-    yc = int(img_dims[2]*((j+yc)/s))
-    # print(xc, yc, w, h)
+    
+    xc, yc = len_per_cell*(xc + i), len_per_cell*(yc + j)
+    
+    xc, yc = int(xc*img_dims[1]), int(yc*img_dims[2])
     x1, y1, x2, y2 = get_x1y1x2y2(xc, yc, w, h)
-    # print(x1, y1, x2, y2)
+    print(f"Label present at ({x1}, {y1}), ({x2}, {y2})")
     image = image*255
     image = np.ascontiguousarray(image, dtype=np.uint8)
-    print(image.shape, type(image))
+    # print(image.shape, type(image))
     # image = cv2.rectangle(image, (x1, y1), (x2, y2), color=(255, 0, 255), thickness=2)
-    image = cv2.rectangle(image, (x1, y1), (x2, y2), (128, 128, 0), 2)
+    image = cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
     cv2.imshow("vis", image)
     cv2.waitKey(0)
 
@@ -346,23 +364,62 @@ def vis(image, xc, yc, w, h, i, j):
 def decode_preds(images, targets):
     # targets to be in the shape of (-1, s, s 5*b + nc)
     found = False
+    print(images.shape, targets.shape)
+    print()
     for image, target in zip(images, targets):
         for i in range(s):
             for j in range(s):
                 cell = target[i, j, :5]
                 pc, xc, yc, w, h = cell
-                if pc > 0.01:
-                    print("visualising ...")
+
+                # if pc > 0.01:
+                if pc == 1.0:
+                    print(f"visualising at cell {i}, {j}")
+                    # 2.0 0.43823529411764706 0.6525 0.01764705882352941 0.03
                     vis(image, xc, yc, w, h, i, j)
-                    
+        # break
+
+
+def dummy_train(model, train_dataloader):
+    criterion = YOLOLoss()
+    opt = torch.optim.Adam(model.parameters(), lr = 10e-5)
+    losses = []
+    print("starting to train ...")
+    torch.cuda.empty_cache()
+    for i, (image, label) in enumerate(train_dataloader):
+        image, label = image.to(device), label.to(device)
+        # print(label.shape)
+        # ts.show(image)
+        # ts.save(image, "./init_tensor.jpg")
+        # print("saved")
+
+
+        # image = torch.randn(4, 3, 448, 448).to("cuda")
+        print(f"overfitting on {image.shape}, {label.shape}")
+        for j in range(10000):
+            opt.zero_grad()
+            # image, label = image.to(device), label.to(device)
+
+            preds = model(image)
+            loss = criterion(preds, label)
+            losses.append(loss.item())
+            loss.backward()
+            opt.step()
+
+            if j%50 == 0:
+                print(f"loss on epoch {j}; step {i} => {loss}")
+                # print(torch.count_nonzero(preds))
+
+        break
+
 
 
 if __name__ == "__main__":
     # x = torch.randn(4, 3, 448, 448)
     device = "cuda"
-    model = YOLO().to(device)
+    model = YOLO()
     # y = model(x)
-    
+    torch.manual_seed(0)
     # print(y.shape)
     load_model = False
 
@@ -372,11 +429,9 @@ if __name__ == "__main__":
         print(f"loaded pretrained model")
 
     train_ds = TrafficDataset()
-    train_loader = DataLoader(train_ds, batch_size = 4, shuffle=True)
+    train_loader = DataLoader(train_ds, batch_size = 8, shuffle=False)
+    
+    # dummy_train(model, train_loader)
+    
     # 2744 total number of elements at output
-    # train(model, train_loader)
-    for images, targets in train_loader:
-        images = images.to(device)
-        preds = model(images)
-        decode_preds(images, preds)
-        break
+    train(model, train_loader)
