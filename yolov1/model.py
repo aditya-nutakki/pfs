@@ -283,6 +283,7 @@ def train(model, train_dataloader):
     print(f"training on a model with {sum(p.numel() for p in model.parameters())} parameters") # 112,240,366 params
     criterion = YOLOLoss()
     opt = torch.optim.Adam(model.parameters(), lr = 1e-5)
+    # opt = torch.optim.Adam(model.parameters(), lr = 0.2e-4)
 
     print("Starting to train !")
     torch.cuda.empty_cache()
@@ -319,7 +320,7 @@ def train(model, train_dataloader):
             torch.save(model.state_dict(), model_save_path)
             print(f"saved for epoch {e}")
 
-        print(f"saving latest model at {model_save_path} ...")  
+        print(f"saving latest model at {os.path.join(save_dir, f'last.pt')} ...")  
         torch.save(model.state_dict(), os.path.join(save_dir, f"last.pt"))
         
 
@@ -429,7 +430,7 @@ if __name__ == "__main__":
         print(f"loaded pretrained model")
 
     train_ds = TrafficDataset()
-    train_loader = DataLoader(train_ds, batch_size = 8, shuffle=False)
+    train_loader = DataLoader(train_ds, batch_size = 8, shuffle=True)
     
     # dummy_train(model, train_loader)
     
