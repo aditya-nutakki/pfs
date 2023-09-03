@@ -320,9 +320,9 @@ def train(model, train_dataloader):
             print(f"saved for epoch {e}")
 
         print(f"saving latest model at {model_save_path} ...")  
-        torch.save(model.state_dict(), )
-        model_save_path = os.path.join(save_dir, f"last.pt")
+        torch.save(model.state_dict(), os.path.join(save_dir, f"last.pt"))
         
+
         print()    
 
 def test_loss(labels):
