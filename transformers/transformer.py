@@ -12,7 +12,7 @@ h = 8
 assert d_model % h == 0, f"Cant divide {d_model} embedding dim by {h} heads"
 dk, dv = d_model//h, d_model//h
 
-n_layers = 6
+n_layers = 2
 dff = 2048
 max_seq_len = 128
 vocab_size = 128
@@ -91,7 +91,6 @@ class MultiHeadAttention(nn.Module):
 
         # q, k, v would now have the shape (batch_size, h, max_seq_len, dk)
 
-
         x, attention_score = self.attention(q,k,v, mask=None)
         print(x.shape, attention_score.shape)
 
@@ -101,24 +100,33 @@ class MultiHeadAttention(nn.Module):
         return x
 
 
-
-class Encoder(nn.Module):
+class EncoderBlock(nn.Module):
     
     def __init__(self) -> None:
         super().__init__()
-        self.input_embedding = InputEmbedding()
+        
         self.mha = MultiHeadAttention()
         self.ff = FeedForward()
         self.layer_norm = nn.LayerNorm(d_model)
 
     def forward(self, x):
-        x = self.input_embedding(x)
         x = self.layer_norm(x + self.mha(x, x, x))
         x = self.layer_norm(x + self.ff(x))
         
         return x
 
 
+class Transformer(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.input_embedding = InputEmbedding()
+        self.encoders = nn.ModuleList([EncoderBlock() for _ in range(n_layers)])
+    
+    def forward(self, x):
+        x = self.input_embedding(x)
+        for e in self.encoders:
+            x = e(x)
+        return x
 
 if __name__ == "__main__":
     x = torch.randint(low = 0, high = vocab_size, size =(4, max_seq_len))
@@ -129,8 +137,13 @@ if __name__ == "__main__":
     # z = mha(y, y, y)
     # print(z.shape)
 
-    enc = Encoder()
-    y = enc(x)
-    print(y.shape, y.mean(), y.std())
+    # enc = EncoderBlock()
+    # print(sum(p.numel() for p in enc.parameters()))
+    # y = enc(x)
+    # print(y.shape, y.mean(), y.std())
 
+    trans = Transformer()
+    y = trans(x)
+    # print(sum(p.numel() for p in trans.parameters()))
+    print(y.shape)
 
