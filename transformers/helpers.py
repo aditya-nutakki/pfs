@@ -14,11 +14,13 @@ n_layers = 2
 dff = 2048
 max_seq_len = 128
 vocab_size = 128
+target_vocab_size = 148
 
 
 class InputEmbedding(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, vocab_size = vocab_size, d_model = d_model) -> None:
         super().__init__()
+        self.vocab_size = vocab_size
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.d_model, self.max_seq_len = d_model, max_seq_len
         self.pos_embedding = self.get_pos_embedding(self.max_seq_len, self.d_model)    
@@ -122,7 +124,6 @@ class EncoderBlock(nn.Module):
 class DecoderBlock(nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        # self.emb = InputEmbedding()
         self.masked_mha = MultiHeadAttention(mask=True)
         self.mha = MultiHeadAttention()
 
@@ -133,7 +134,6 @@ class DecoderBlock(nn.Module):
     def forward(self, x, encoder_output):
         # x = self.emb(x)
         x = self.layer_norm(x + self.mha(x, x, x))
-        # x = self.layer_norm(x + self.masked_mha(x, encoder_op, encoder_op))
         x = self.layer_norm(x + self.masked_mha(x, encoder_output, encoder_output))
         x = self.layer_norm(x + self.ff(x))
         

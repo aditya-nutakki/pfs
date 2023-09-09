@@ -2,15 +2,17 @@ import torch
 import os
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset
 # from torch.optim import Adam
 from math import sin, cos
 from helpers import *
 
+target_vocab_size = 196
 
 class Transformer(nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.input_embedding, self.output_embedding = InputEmbedding(), InputEmbedding()
+        self.input_embedding, self.output_embedding = InputEmbedding(), InputEmbedding(vocab_size = target_vocab_size)
         self.encoders = nn.ModuleList([EncoderBlock() for _ in range(n_layers)])
         self.decoders = nn.ModuleList([DecoderBlock() for _ in range(n_layers)])
         self.final_linear = nn.Linear(d_model, vocab_size)
@@ -35,14 +37,13 @@ class Transformer(nn.Module):
         
         y = self.decode(y, encoder_output)
         y = self.final_linear(y)
-
         return F.log_softmax(y, dim = -1)
 
 
 
 if __name__ == "__main__":
     x = torch.randint(low = 0, high = vocab_size, size =(4, max_seq_len))
-    _x = torch.randint(low = 0, high = vocab_size, size =(4, max_seq_len))
+    _x = torch.randint(low = 0, high = target_vocab_size, size =(4, max_seq_len)) # expected output tensor
     # dec = DecoderBlock()
     # y = dec(x)
     # print(y.shape)
