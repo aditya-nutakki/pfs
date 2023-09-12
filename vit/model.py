@@ -6,53 +6,85 @@ from math import sin, cos
 
 d = 32 # 768 is the number used in the paper
 dff = 3072
-h = 12
+h = 4
 
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, h = 8, d = 32) -> None:
+    def __init__(self, h = 8, d = 32, patch_dim = 7) -> None:
         super().__init__()
         self.d = d
         assert d % h == 0, f"cant divide {d} hidden dimensions by {h} heads"
         self.dk = self.d // h
         self.dv = self.d // h
         self.dropout = nn.Dropout(0.25)
+        self.n_patch = patch_dim**2 + 1
 
-        self.wq = nn.Linear(d, self.dk)
-        self.wk = nn.Linear(d, self.dk)
-        self.wv = nn.Linear(d, self.dv)
+        self.wq = nn.Linear(d, d)
+        self.wk = nn.Linear(d, d)
+        self.wv = nn.Linear(d, d)
         
-        self.wo = nn.Linear()
+        self.wo = nn.Linear(d, d)
 
+
+    def attention(self, q, k, v):
+        dot_product = F.softmax((q @ k.transpose(-1, -2))/self.dk**0.5, dim = -1)
+        return dot_product @ v, dot_product
 
 
     def forward(self, q, k, v):
-
-        q = q.view(-1, h, 50, self.dk)
-
-        return q
+        # q, k, v to be of the shape => (-1, 49 + 1, d_hidden) -> (-1, h, 49+1, dk)
+        q = self.wq(q).view(-1, self.n_patch, h, self.dk).transpose(1, 2)
+        k = self.wk(k).view(-1, self.n_patch, h, self.dk).transpose(1, 2)
+        v = self.wv(v).view(-1, self.n_patch, h, self.dv).transpose(1, 2)
+        
+        attention, dot_product = self.attention(q, k, v)
+        # attention to be of the shape (-1, h, self.n_patch, dk)
+        # attention = attention.view(-1, self.n_patch, h * self.dv)
+        attention = attention.transpose(1, 2).view(-1, self.n_patch, d) # d can also be written as h * self.dv
+        return self.wo(attention), dot_product
     
 
 
+class FeedForward(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.dff = dff
+        self.d = d
+        self.linear1 = nn.Linear(d, dff)
+        self.dropout = nn.Dropout(0.3)
+        self.linear2 = nn.Linear(dff, d)
+
+    def forward(self, x):
+        x = F.gelu(self.linear1(x))
+        x = self.dropout(x)
+        return self.linear2(x)
+
+
 class EncoderBlock(nn.Module):
-    def __init__(self, h, d, dff) -> None:
+    def __init__(self, h, d, patch_dim) -> None:
         super().__init__()
         self.dff = dff
         self.h = h
         self.d = d
+        self.patch_dim = patch_dim
         self.layer_norm = nn.LayerNorm(self.d)
-        self.mha = MultiHeadAttention(h = self.h)
-    
+        self.mha = MultiHeadAttention(h = self.h, d = self.d, patch_dim = self.patch_dim)
+        self.ff = FeedForward()
+
     def forward(self, x):
+        normal_x = self.layer_norm(x)
+        x = x + self.mha(normal_x, normal_x, normal_x)
+        x = x + self.ff(self.layer_norm(x))
         return x
 
 
 class ViTEncoder(nn.Module):
-    def __init__(self, n_layers) -> None:
+    def __init__(self, n_layers, patch_dim) -> None:
         super().__init__()
         self.n_layers = n_layers
-        self.encoders = nn.ModuleList([EncoderBlock for _ in range(n_layers)])
+        self.patch_dim = patch_dim
+        self.encoders = nn.ModuleList([EncoderBlock(h = 4, d = 32, patch_dim=self.patch_dim) for _ in range(n_layers)])
 
     def forward(self, x):
         for e in self.encoders:
@@ -85,8 +117,9 @@ class ViT(nn.Module):
         # print(type(self.pos_embedding)) # type is of torch.nn.parameter.Parameter
         self.layer_norm = nn.LayerNorm(self.d)
 
+        self.vit_encoder = ViTEncoder(n_layers=3, patch_dim=self.N + 1)
 
-    def get_pos_embedding(n, d):
+    def get_pos_embedding(self, n, d):
         pos_embedding = torch.zeros(n, d)
 
         for i in range(n):
@@ -108,11 +141,8 @@ class ViT(nn.Module):
         )
         x += self.pos_embedding
         # you now have a tensor of shape (batch_size, n_patches**2 + 1, d); we must now normalise and then pass it through the MHA module -> this can be encapsulated in a single encoder block
-
-        
-
-
-
+        x = self.vit_encoder(x)
+    
 
         return x
 

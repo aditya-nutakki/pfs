@@ -90,8 +90,8 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, q, k, v, mask = None, dropout = None):
         q = self.wq(q).view(-1, max_seq_len, h, dk).transpose(1, 2)
-        k = self.wq(k).view(-1, max_seq_len, h, dk).transpose(1, 2) 
-        v = self.wq(v).view(-1, max_seq_len, h, dv).transpose(1, 2)
+        k = self.wk(k).view(-1, max_seq_len, h, dk).transpose(1, 2) 
+        v = self.wv(v).view(-1, max_seq_len, h, dv).transpose(1, 2)
 
         # q, k, v would now have the shape (batch_size, h, max_seq_len, dk)
 
