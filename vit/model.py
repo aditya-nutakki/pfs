@@ -40,8 +40,7 @@ class MultiHeadAttention(nn.Module):
         
         attention, dot_product = self.attention(q, k, v)
         # attention to be of the shape (-1, h, self.n_patch, dk)
-        # attention = attention.view(-1, self.n_patch, h * self.dv)
-        attention = attention.transpose(1, 2).view(-1, self.n_patch, d) # d can also be written as h * self.dv
+        attention = attention.transpose(1, 2).reshape(-1, self.n_patch, d) # d can also be written as h * self.dv
         return self.wo(attention), dot_product
     
 
@@ -74,7 +73,8 @@ class EncoderBlock(nn.Module):
 
     def forward(self, x):
         normal_x = self.layer_norm(x)
-        x = x + self.mha(normal_x, normal_x, normal_x)
+        _attention_output, dot_product = self.mha(normal_x, normal_x, normal_x)
+        x = x + _attention_output
         x = x + self.ff(self.layer_norm(x))
         return x
 
@@ -94,13 +94,13 @@ class ViTEncoder(nn.Module):
 
 
 class ViT(nn.Module):
-    def __init__(self, image_dims = (1, 28, 28), num_patches = 4) -> None:
+    def __init__(self, image_dims = (1, 28, 28), num_patches = 4, num_classes = 10) -> None:
         super().__init__()
         self.num_patches = num_patches
         self.image_dims = image_dims 
         self.c, self.h, self.w = image_dims
         self.d = d
-
+        self.num_classes = num_classes
         assert self.image_dims[1] == self.image_dims[2]
         assert self.image_dims[1] % num_patches == 0, f"cannot divide {self.image_dims[1]} with patch size of {num_patches}"
         
@@ -116,8 +116,10 @@ class ViT(nn.Module):
         self.pos_embedding = self.get_pos_embedding(self.n_patches ** 2 + 1, self.d) # add this to the tensor of (self.N^2 + 1 class_token) 
         # print(type(self.pos_embedding)) # type is of torch.nn.parameter.Parameter
         self.layer_norm = nn.LayerNorm(self.d)
+        self.vit_encoder = ViTEncoder(n_layers=3, patch_dim=self.n_patches)
 
-        self.vit_encoder = ViTEncoder(n_layers=3, patch_dim=self.N + 1)
+        self.mlp_ff = nn.Linear(self.d, self.d)
+        self.class_ff = nn.Linear(self.d, self.num_classes)
 
     def get_pos_embedding(self, n, d):
         pos_embedding = torch.zeros(n, d)
@@ -142,9 +144,9 @@ class ViT(nn.Module):
         x += self.pos_embedding
         # you now have a tensor of shape (batch_size, n_patches**2 + 1, d); we must now normalise and then pass it through the MHA module -> this can be encapsulated in a single encoder block
         x = self.vit_encoder(x)
-    
 
-        return x
+        x = self.mlp_ff(x[:, -1])
+        return F.softmax(self.class_ff(x), dim = -1)
 
 
 
@@ -152,7 +154,7 @@ class ViT(nn.Module):
 if __name__ == "__main__":
     w = 28
     image_dims = (1, w, w) # c, h, w
-    vit = ViT(image_dims= image_dims, num_patches = 4)
+    vit = ViT(image_dims= image_dims, num_patches = 4, num_classes=10)
     img_dims = (4, *image_dims) # n, c, h, w
     img = torch.rand(img_dims)
     y = vit(img)
