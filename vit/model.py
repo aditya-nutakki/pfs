@@ -107,32 +107,31 @@ class ViTEncoder(nn.Module):
 
 
 class ViT(nn.Module):
-    def __init__(self, chw, n_patches=7, n_blocks=2, hidden_d=8, n_heads=2, out_d=10):
+    def __init__(self, image_dims, n_patches=7, n_blocks=2, hidden_d=8, n_heads=2, num_classes=10):
         # Super constructor
         super().__init__()
         
         # Attributes
-        self.chw = chw # c, h, w
+        self.image_dims = image_dims # c, h, w
         self.n_patches = n_patches
         self.n_blocks = n_blocks
         self.n_heads = n_heads
         self.d = hidden_d
         
         # Input and patches sizes
-        assert chw[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
-        assert chw[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
-        self.patch_size = (chw[1] // n_patches, chw[2] // n_patches)
+        assert image_dims[1] % n_patches == 0, "Input shape not entirely divisible by number of patches"
+        assert image_dims[2] % n_patches == 0, "Input shape not entirely divisible by number of patches"
+        self.patch_size = (image_dims[1] // n_patches, image_dims[2] // n_patches)
 
         # 1) Linear mapper
-        self.input_d = int(chw[0] * self.patch_size[0] * self.patch_size[1])
+        self.input_d = int(image_dims[0] * self.patch_size[0] * self.patch_size[1])
         self.linear_mapper = nn.Linear(self.input_d, self.d)
         
         self.class_token = nn.Parameter(torch.rand(1, self.d))
         
-        self.blocks = nn.ModuleList([EncoderBlock(hidden_d, n_heads) for _ in range(n_blocks)])
-        self.mlp = nn.Linear(self.d, out_d)
+        self.mlp = nn.Linear(self.d, num_classes)
 
-        self.patch_dim = self.chw[0] * (self.patch_size[0]**2)
+        self.patch_dim = self.image_dims[0] * (self.patch_size[0]**2)
         
         self.pos_embeds = self.get_pos_embedding(n_patches**2 + 1, self.d)
         self.vit_encoders = ViTEncoder(d = self.d, n_heads= self.n_heads, n_layers= 4, patch_dim=self.n_patches)
@@ -181,7 +180,13 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device: ", device, f"({torch.cuda.get_device_name(device)})" if torch.cuda.is_available() else "")
     
-    model = ViT((3, 32, 32), n_patches=8, n_blocks=4, hidden_d=16, n_heads=4, out_d=10).to(device)
+    model = ViT(image_dims = (3, 32, 32), 
+                n_patches = 8, 
+                n_blocks = 4, 
+                hidden_d = 16, 
+                n_heads = 4, 
+                num_classes = 10).to(device)
+    
     N_EPOCHS = 5
 
     optimizer = Adam(model.parameters(), lr=3e-4)
