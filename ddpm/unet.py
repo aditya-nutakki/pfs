@@ -68,12 +68,15 @@ class decoder_block(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, input_channels = 3, output_channels = 3):
+    def __init__(self, input_channels = 3, output_channels = 3, num_steps = 512):
         super().__init__()
 
         self.input_channels = input_channels
         self.output_channels = output_channels
-        
+    
+        self.num_steps = num_steps
+        self.embedding = nn.Embedding(self.num_steps, 512)
+
         self.e1 = encoder_block(self.input_channels, 64)
         self.e2 = encoder_block(64, 128)
         self.e3 = encoder_block(128, 256)
@@ -89,17 +92,21 @@ class UNet(nn.Module):
         self.outputs = nn.Conv2d(64, self.output_channels, kernel_size=1, padding=0)
 
 
-    def forward(self, inputs):
+    def forward(self, inputs, t = None):
         # downsampling block
+        embedding = self.embedding(t).view(-1, 512, 1, 1)
+        # print(embedding.shape)
         s1, p1 = self.e1(inputs)
         s2, p2 = self.e2(p1)
         s3, p3 = self.e3(p2)
         s4, p4 = self.e4(p3)
+        p4 = p4 + embedding 
 
         b = self.b(p4)
-
+        
         # upsampling block
         d1 = self.d1(b, s4)
+        d1 = d1 + embedding
         d2 = self.d2(d1, s3)
         d3 = self.d3(d2, s2)
         d4 = self.d4(d3, s1)
@@ -110,7 +117,10 @@ class UNet(nn.Module):
 
 if __name__ == "__main__":    
     device = "cuda:0"
-    inputs = torch.randn((2, 3, 32, 32)).to(device)
-    model = Model().to(device)
-    y = model(inputs)
-    print(y, y.shape)
+    batch_size = 2
+    in_channels, w = 3, 32
+    inputs = torch.randn((batch_size, in_channels, w, w), device=device)
+    randints = torch.randint(1, 512, (batch_size, ), device=device)
+    model = UNet().to(device)
+    y = model(inputs, randints)
+    print(y.shape)
