@@ -31,7 +31,7 @@ class DDPM(nn.Module):
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim = -1)
         self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0)
-        self.posterior_variance = self.betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
+        self.betas_hat = self.betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
 
 
         self.image_dims = image_dims
@@ -69,6 +69,7 @@ class DDPM(nn.Module):
         rand_steps = torch.randint(1, self.t, (batch_size, ))
         (xt, noise_t), (xt_minus_one, noise_t_minus_one) = self.apply_noise(images, rand_steps), self.apply_noise(images, rand_steps-1) # need to predict xt_minus_one given xt
 
+        # visualising
         # print(f"rand step => {rand_step}")
         # ts.save(xt, "xts.jpeg")
         # ts.save(xt_minus_one, "xt-1s.jpeg")
@@ -83,13 +84,11 @@ class DDPM(nn.Module):
             print("Denoising ...")
             stime = time()
             for t in range(self.t - 1, -1, -1):
-                # if t == 1:
-                #     return x
-                noise_comp = torch.randn(batch_size, *image_dims, device=device)*torch.sqrt(self.posterior_variance[t])
+                
+                noise_comp = torch.randn(batch_size, *image_dims, device=device)*torch.sqrt(self.betas_hat[t]) # can multiply it with torch.sqrt(self.betas[t]) as well and you would get similar results
                 one_by_alpha = (1/torch.sqrt(self.alphas[t]))
                 _t = torch.Tensor([t]).type(torch.LongTensor).to(device)
-                x = (one_by_alpha * (x - ((self.betas[t]) * self.model(x, _t) )/(torch.sqrt(1 - self.alphas_cumprod[t]))))
-                x = x + noise_comp
+                x = (one_by_alpha * (x - ((self.betas[t]) * self.model(x, _t) )/(torch.sqrt(1 - self.alphas_cumprod[t])))) + noise_comp
 
                 if t % self.save_interval == 0:
                     ts.save(x, f"diffusion_{t}_{ep}.jpeg")
@@ -110,10 +109,7 @@ def get_dataloader():
 
 
 if __name__ == "__main__":
-    # x = torch.randn(4, *image_dims)
-    # model = UNet()
-    # y = model(x)
-    # print(y, y.shape)
+    
     dataloader = get_dataloader()
     t = 512
     ddpm = DDPM(t = t)
@@ -141,11 +137,4 @@ if __name__ == "__main__":
             if i % 100 == 0:
                 print(loss.item(), i)
             
-
         ddpm.reverse(ep)
-            # for j in range(t):
-            #     print(ddpm.alphas_cumprod[j])
-            #     _images = apply_noise(images, ddpm.alphas_cumprod[j])
-            #     if j % 4 == 0:
-        # ts.save(xt, f"./{ep}_xt.jpeg")
-        # ts.save(pred_target, f"./{ep}_preds.jpeg")
