@@ -9,7 +9,7 @@ from helpers import *
 import torchshow as ts
 from torchvision.datasets.mnist import MNIST
 from unet import UNet
-
+from time import time
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -30,6 +30,9 @@ class DDPM(nn.Module):
         self.betas = torch.linspace(self.beta1, self.beta2, self.t)
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim = -1)
+        self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0)
+        self.posterior_variance = self.betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
+
 
         self.image_dims = image_dims
         self.c, self.h, self.w = image_dims
@@ -38,6 +41,7 @@ class DDPM(nn.Module):
         self.criterion = nn.MSELoss()
         self.opt = Adam(self.model.parameters(), lr = 2e-4)
 
+        self.save_interval = 128
 
     def get_alphas(self, rand_steps):
         # returns alpha_cumprod at rand_step index
@@ -71,15 +75,27 @@ class DDPM(nn.Module):
         return xt, noise_t, xt_minus_one, noise_t_minus_one, rand_steps
 
 
-    def reverse(self):
+    def reverse(self, ep):
         self.model.eval()
         with torch.no_grad():
             x = torch.randn(batch_size, *image_dims, device = device)
-            for _ in range(self.t):
-                x = self.model(x)
+            # denoise image here
+            print("Denoising ...")
+            stime = time()
+            for t in range(self.t - 1, -1, -1):
+                # if t == 1:
+                #     return x
+                noise_comp = torch.randn(batch_size, *image_dims, device=device)*torch.sqrt(self.posterior_variance[t])
+                one_by_alpha = (1/torch.sqrt(self.alphas[t]))
+                _t = torch.Tensor([t]).type(torch.LongTensor).to(device)
+                x = (one_by_alpha * (x - ((self.betas[t]) * self.model(x, _t) )/(torch.sqrt(1 - self.alphas_cumprod[t]))))
+                x = x + noise_comp
 
-        return x
+                if t % self.save_interval == 0:
+                    ts.save(x, f"diffusion_{t}_{ep}.jpeg")
+            ftime = time()
 
+            print(f"reverse diffusion done in {ftime-stime}s for {self.t} time steps")
 
     
 def get_dataloader():
@@ -105,10 +121,9 @@ if __name__ == "__main__":
     epochs = 10
 
     for ep in range(epochs):
+        ddpm.model.train()
         for i, (images, _) in enumerate(dataloader):
-            
             ddpm.opt.zero_grad()
-
             images = images.to(device)
             # xt, xt_minus_one, rand_steps = ddpm(images) # xt-1 is target given xt
             xt, noise_t, xt_minus_one, noise_t_minus_one, rand_steps = ddpm(images)
@@ -124,7 +139,10 @@ if __name__ == "__main__":
             ddpm.opt.step()
 
             if i % 100 == 0:
-                print(loss.item())
+                print(loss.item(), i)
+            
+
+        ddpm.reverse(ep)
             # for j in range(t):
             #     print(ddpm.alphas_cumprod[j])
             #     _images = apply_noise(images, ddpm.alphas_cumprod[j])
