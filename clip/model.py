@@ -7,13 +7,14 @@ from helpers import ImageEncoder, TextEncoder
 
 
 class CLIP(nn.Module):
-    def __init__(self, embedding_dim = 512) -> None:
+    def __init__(self, embedding_dim = 512, model_type = "resnet") -> None:
         super().__init__()
         self.embedding_dim = embedding_dim
-        self.image_encoder = ImageEncoder(embedding_dim = self.embedding_dim)
+        self.model_type = model_type
+        self.image_encoder = ImageEncoder(embedding_dim = self.embedding_dim, model_type = self.model_type)
         self.text_encoder = TextEncoder(d_model = self.embedding_dim)
         
-        assert self.image_encoder.embedding_dim == self.text_encoder.d_model, f"embedding_dim of {self.embedding_dim} not constant across image and text encoder"
+        assert self.image_encoder.embedding_dim == self.text_encoder.d_model, f"embedding_dim of {self.embedding_dim} not constant across image and text encoders"
     
 
     def forward(self, images, captions):
