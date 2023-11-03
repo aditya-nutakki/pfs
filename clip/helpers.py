@@ -167,8 +167,8 @@ if __name__ == "__main__":
     # print(caption.shape)
     # print(image.shape, caption)
     # ts.save(image, "dummy.jpeg")
-    
-    images = torch.stack([image, image1], dim = 0)
-    print(images.shape)
-    y = enc(images)
-    print(y, y.shape)
+    print(image.shape, caption["input_ids"].shape)
+    # images = torch.stack([image, image1], dim = 0)
+    # print(images.shape)
+    # y = enc(images)
+    # print(y, y.shape)

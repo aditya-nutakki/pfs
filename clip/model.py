@@ -22,7 +22,10 @@ class CLIP(nn.Module):
         # print(f"image embedding shape => {image_embeddings.shape}")
         text_embeddings = self.text_encoder(captions)
         # print(f"text embedding shape => {text_embeddings.shape}")
-
+        
+        # normalizing tensors
+        # l2 normalize a vector by b = a / torch.sqrt(torch.sum(a**2, dim=-1)).view(-1, 1)
+        image_embeddings, text_embeddings = image_embeddings/ torch.sqrt(torch.sum(image_embeddings**2, dim=-1)).view(-1, 1), text_embeddings / torch.sqrt(torch.sum(text_embeddings**2, dim=-1)).view(-1, 1)
         return image_embeddings, text_embeddings
 
 
