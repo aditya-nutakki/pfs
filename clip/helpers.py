@@ -1,4 +1,4 @@
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 import torch, torchvision
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,10 +13,6 @@ from torchvision.models import resnet50, ResNet50_Weights
 from torchvision.transforms import transforms
 
 from transformers import DistilBertConfig, DistilBertModel, DistilBertTokenizer
-import torchshow as ts
-
-# import warnings
-# warnings.filterwarnings("ignore")
 
 
 class ImageEncoder(nn.Module):
@@ -144,30 +140,37 @@ class CLIPDataset(Dataset):
         return image, caption
 
 
-if __name__ == "__main__":
-    enc = ImageEncoder()
-    # enc = TextEncoder()
-    # print(sum([p.numel() for p in enc.parameters()]))
-    
+
+# here is to test out individual blocks
+
+# if __name__ == "__main__":
+    # Testing out Image Encoder
+    # enc = ImageEncoder()
     # x = torch.randn(4, 3, 224, 224)
     # y = enc(x)
     # print(y, y.shape)
     # print(torch.min(y), torch.max(y))
 
+
+    # Testing out Text Encoder
+    # enc = TextEncoder()
     # x = torch.randint(0, 10, (4, 12))
     # print(x)
     # y = enc(x)
     # print(y, y.shape)
     # print(y)
-    data = CLIPDataset("/mnt/d/work/datasets/coco_captions")
-    image, caption = data[23]
-    image1, caption2 = data[2]
+
+    # print(sum([p.numel() for p in enc.parameters()]))
+
+    # data = CLIPDataset("/mnt/d/work/datasets/coco_captions")
+    # image, caption = data[0]
+    # image1, caption1 = data[1]
     # print(caption)
-    # caption = torch.cat([caption, caption2], dim = 0)
+    # caption = torch.cat([caption, caption1], dim = 0)
     # print(caption.shape)
     # print(image.shape, caption)
     # ts.save(image, "dummy.jpeg")
-    print(image.shape, caption["input_ids"].shape)
+    # print(image.shape, caption["input_ids"].shape)
     # images = torch.stack([image, image1], dim = 0)
     # print(images.shape)
     # y = enc(images)

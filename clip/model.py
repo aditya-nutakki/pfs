@@ -1,8 +1,6 @@
-import torch, torchvision
-import os, json
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.transforms import transforms
 from helpers import ImageEncoder, TextEncoder
 
 

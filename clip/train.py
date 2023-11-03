@@ -1,12 +1,9 @@
 from model import CLIP
 from torch.optim import Adam
-from torch.nn import CrossEntropyLoss
 from helpers import *
-import torchshow as ts
 import os
 from time import time
 import numpy as np
-from transformers import DistilBertTokenizer
 
 def save_model(model, save_path):
     torch.save(model.state_dict(), save_path)
