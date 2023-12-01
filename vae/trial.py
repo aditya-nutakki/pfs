@@ -6,23 +6,26 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.adam import Adam
 from torch import Tensor
+from torchvision.datasets.cifar import CIFAR10
+from torchvision.datasets.mnist import MNIST
 
 
 class VanillaVAE(nn.Module):
-
 
     def __init__(self,
                  in_channels: int,
                  latent_dim: int,
                  hidden_dims = None,
+                 kld_weight = 1.0,
                  **kwargs) -> None:
         super(VanillaVAE, self).__init__()
-
+        self.num_channels = in_channels
         self.latent_dim = latent_dim
 
         modules = []
         if hidden_dims is None:
-            hidden_dims = [32, 64, 128, 256, 512]
+            # hidden_dims = [32, 64, 128, 256, 512, 512]
+            hidden_dims = [32, 64, 128, 256]
 
         # Build Encoder
         for h_dim in hidden_dims:
@@ -63,6 +66,8 @@ class VanillaVAE(nn.Module):
 
 
         self.decoder = nn.Sequential(*modules)
+        
+        self.kld_weight = kld_weight
 
         self.final_layer = nn.Sequential(
                             nn.ConvTranspose2d(hidden_dims[-1],
@@ -73,7 +78,7 @@ class VanillaVAE(nn.Module):
                                                output_padding=1),
                             nn.BatchNorm2d(hidden_dims[-1]),
                             nn.LeakyReLU(),
-                            nn.Conv2d(hidden_dims[-1], out_channels= 3,
+                            nn.Conv2d(hidden_dims[-1], out_channels= self.num_channels,
                                       kernel_size= 3, padding= 1),
                             nn.Tanh())
 
@@ -85,6 +90,7 @@ class VanillaVAE(nn.Module):
         :return: (Tensor) List of latent codes
         """
         result = self.encoder(input)
+        # print(f"init encoder shape => {result.shape}")
         result = torch.flatten(result, start_dim=1)
 
         # Split the result into mu and var components
@@ -101,8 +107,11 @@ class VanillaVAE(nn.Module):
         :param z: (Tensor) [B x D]
         :return: (Tensor) [B x C x H x W]
         """
+        # print(f"enc op => {z.shape}")
         result = self.decoder_input(z)
-        result = result.view(-1, 512, 2, 2)
+        # print(f"init decoder result = {result.shape}")
+        result = result.view(-1, 256, 2, 2)
+        # print(f"view decoder result = {result.shape}")
         result = self.decoder(result)
         result = self.final_layer(result)
         return result
@@ -138,15 +147,13 @@ class VanillaVAE(nn.Module):
         input = args[1]
         mu = args[2]
         log_var = args[3]
+        
+        recons_loss =F.mse_loss(recons, input, reduction="sum")
+        kld_loss = torch.sum(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
 
-        kld_weight = kwargs['M_N'] # Account for the minibatch samples from the dataset
-        recons_loss =F.mse_loss(recons, input)
-
-
-        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
-
-        loss = recons_loss + kld_weight * kld_loss
+        loss = recons_loss + self.kld_weight * kld_loss
         return {'loss': loss, 'Reconstruction_Loss':recons_loss.detach(), 'KLD':-kld_loss.detach()}
+
 
     def sample(self,
                num_samples:int,
@@ -174,3 +181,89 @@ class VanillaVAE(nn.Module):
         """
 
         return self.forward(x)
+    
+
+device = "cuda"
+
+def eval(ep, num_samples = 32):
+    model.eval()
+    print("Evaluating ...")
+    with torch.no_grad():
+        for i, (images, labels) in enumerate(loader):
+            images = images.to(device)
+            preds, input, mu, log_var = model(images)
+            ts.save(preds, f"./recons_{ep}_{i}.jpg")
+            break    
+        
+        sampled_images = model.sample(num_samples, current_device="cuda")
+        ts.save(sampled_images, f"./sample_{ep}.jpg")
+        
+    print("saved")
+
+
+
+def train():
+    
+    lr = 3e-4
+    opt = Adam(model.parameters(), lr = lr)
+
+    print("Starting...")
+
+    for ep in range(20):
+        model.train()
+        losses = []
+
+        for i, (images, labels) in enumerate(loader):
+            opt.zero_grad()
+
+            images = images.to(device)
+            # ts.save(images, "./input.jpg")
+            # exit()
+
+            preds, input, mu, log_var = model(images)
+            # print(f"preds shsape = {preds.shape}")
+            loss = model.loss_function(preds, input, mu, log_var)
+            loss, recon_loss, kl_loss = loss["loss"], loss["Reconstruction_Loss"], loss["KLD"]
+            
+            # print(loss.item(), recon_loss.item(), kl_loss.item())
+
+            losses.append(loss.item())
+            if i % 100 == 0:
+                print(f"Loss on step {i}; epoch {ep} => {loss.item(), recon_loss.item(), kl_loss.item()}")
+
+            loss.backward()
+            opt.step()
+
+        
+        eval(ep)
+        print(f"Avg loss for epoch {ep} => {sum(losses)/len(losses)}")
+        print()
+
+
+num_input_channels = 1
+# model = VanillaVAE(in_channels = 3, latent_dim = 24, hidden_dims=[16, 32, 64, 32, 32])
+model = VanillaVAE(in_channels = num_input_channels, latent_dim = 128, kld_weight = 0.8)
+model = model.to(device)
+
+# loader = DataLoader(ds, batch_size=32, shuffle=True, num_workers=2)
+
+img_sz = 32
+
+dataset = MNIST(root="./", download=True,
+                        transform=transforms.Compose([
+                        transforms.Resize((img_sz, img_sz)), # or h
+                        transforms.ToTensor()
+                        ]))
+
+# dataset = CIFAR10(root="./", download=True,
+#                         transform=transforms.Compose([
+#                         transforms.Resize((img_sz, img_sz)), # or h
+#                         transforms.ToTensor()
+#                         ]))
+
+loader = DataLoader(dataset, batch_size=24, shuffle=True, num_workers=2)
+
+# loader = CLIPDataset("/mnt/d/work/datasets/faces/Humans", img_sz = img_sz)
+# loader = DataLoader(loader, batch_size = 32, shuffle=True, num_workers=2)
+train()
+
