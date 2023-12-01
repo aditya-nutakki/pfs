@@ -52,32 +52,70 @@ class VAE_Encoder(nn.Module):
         # print(f"latent space dims => {z.shape}")
         return mean, log_var, z
 
+
+
+class conv_block(nn.Module):
+    def __init__(self, in_c, out_c, activation = "relu"):
+        super().__init__()
+
+        self.conv1 = nn.Conv2d(in_c, out_c, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(out_c)
+
+        self.conv2 = nn.Conv2d(out_c, out_c, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_c)
+
+        self.relu = nn.ReLU()
+        self.act = nn.ReLU() if activation == "relu" else nn.SiLU()
+
+    def forward(self, inputs):
+        x = self.conv1(inputs)
+        x = self.bn1(x)
+        # x = self.relu(x)
+        x = self.act(x)
+
+        x = self.conv2(x)
+        x = self.bn2(x)
+        # x = self.relu(x)
+        x = self.act(x)
+
+        return x
+    
     
 class VAE_Decoder(nn.Module):
     def __init__(self, input_shape = (3, 24, 24), output_shape = (3, 224, 224), latent_dims = 16) -> None:
         super().__init__()
         self.k = 24
+        self.conv1 = conv_block(64, 64)
         self.model = nn.Sequential(
-            nn.ConvTranspose2d(in_channels = 3, out_channels = 64, kernel_size = 7, stride = 2),
+            nn.ConvTranspose2d(in_channels = 3, out_channels = 64, kernel_size = 2, stride = 2),
             nn.ReLU(),
-            nn.ConvTranspose2d(in_channels = 64, out_channels = 128, kernel_size = 7, stride = 2),
+            nn.ConvTranspose2d(in_channels = 64, out_channels = 64, kernel_size = 2, stride = 2),
             nn.ReLU(),
-            nn.ConvTranspose2d(in_channels = 128, out_channels = 3, kernel_size = 7, stride = 2, padding = 2, output_padding=1),
+            nn.ConvTranspose2d(in_channels = 64, out_channels = 3, kernel_size = 2, stride = 2),
+            nn.ReLU(),
+            # conv_block(32, 32),
+            # nn.ConvTranspose2d(in_channels = 32, out_channels = 3, kernel_size = 2, stride = 2),
         )
         self.input_shape = input_shape
-        self.latent_linear = nn.Linear(latent_dims, 3 * self.k * self.k)
+        # self.latent_linear = nn.Linear(latent_dims, 3 * self.k * self.k)
+        self.latent_linear = nn.Linear(latent_dims, 3 * 28 * 28)
         
 
     def forward(self, x):
         x = self.latent_linear(x)
-        x = x.view(-1, *self.input_shape)
+        # x = x.view(-1, *self.input_shape)
+        x = x.view(-1, 3, 28, 28)
+        # print(f"init x => {x.shape}")
         x = self.model(x)
-        # print(x.shape)
-        return torch.tanh(x)
+        # print(x.shape, x.mean().item(), x.std().item())
+        x = torch.tanh(x)
+        # print(x.shape, x.mean().item(), x.std().item())
+        # print()
+        return x
 
 
 class VAE(nn.Module):
-    def __init__(self, latent_dims = 16) -> None:
+    def __init__(self, latent_dims = 32) -> None:
         super().__init__()
         self.latent_dims = latent_dims
         self.encoder = VAE_Encoder(latent_dims=self.latent_dims)
@@ -111,7 +149,7 @@ def vae_loss(y_pred, y_true):
 
 
 class CLIPDataset(Dataset):
-    def __init__(self, dataset_path, _transforms = None, max_len = 32) -> None:
+    def __init__(self, dataset_path, _transforms = None, max_len = 32, img_sz = 224) -> None:
         super().__init__()
         
         self.max_len = max_len
@@ -120,19 +158,18 @@ class CLIPDataset(Dataset):
         if not self.transforms:
             self.transforms = transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Resize((224, 224)),
+                transforms.Resize((img_sz, img_sz)),
                 transforms.Normalize((0.5, ), (0.5,))
             ])
 
-        self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-        # print(type(self.tokenizer))
 
         self.dataset_path = dataset_path
         # self.images_path, self.captions_path = os.path.join(self.dataset_path, "images"), os.path.join(self.dataset_path, "captions")
         # self.images, self.captions = os.listdir(self.images_path), os.listdir(self.captions_path)
 
+        self.limit = 1500
         self.images_path = dataset_path
-        self.images = os.listdir(self.images_path)
+        self.images = os.listdir(self.images_path)[:self.limit]
         self.images = [os.path.join(self.images_path, image) for image in self.images]
         # self.captions = [os.path.join(self.captions_path, caption) for caption in self.captions]
 
@@ -147,22 +184,6 @@ class CLIPDataset(Dataset):
         # print(image.shape)
         image = self.transforms(image)
 
-        # tokenize text
-        # caption_path = self.captions[index]
-        # # print(caption_path)
-        # with open(caption_path) as f:
-        #     captions = f.readlines()
-        #     captions = [caption.strip() for caption in captions]
-        #     caption = choice(captions)
-        #     # caption = captions[0]
-        #     # print(f"caption is: {caption}")
-        #     caption = self.tokenizer(caption, return_tensors = "pt", max_length = self.max_len, padding = "max_length")
-        #     caption["input_ids"] = caption["input_ids"].view(-1)
-        #     # print(caption)
-        # # print(self.tokenizer.batch_decode(caption["input_ids"], skip_special_tokens = True)) # -> to decode a tensor to list of decoded sentences
-
-        # return image, caption
-    
         return image
 
 
@@ -186,15 +207,16 @@ if __name__ == "__main__":
     # y = enc(x)
     # print(y.shape, y.mean(), y.std())
 
-    # enc = VAE_Decoder()
-    # print(sum([p.numel() for p in enc.parameters()]))
-    # x = torch.randn(4, 16)
-    # y = enc(x)
-    # print(y.shape, y.mean(), y.std())
+    latent_dims = 64
+    enc = VAE_Decoder(latent_dims=latent_dims)
+    print(sum([p.numel() for p in enc.parameters()]))
+    x = torch.randn(4, latent_dims)
+    y = enc(x)
+    print(y.shape, y.mean(), y.std())
 
-    vae = VAE()
-    print(sum([p.numel() for p in vae.parameters()]))
-    x = torch.randn(4, 3, 224, 224)
-    y = vae(x)
-    print(y.shape)
-    pass
+    # vae = VAE()
+    # print(sum([p.numel() for p in vae.parameters()]))
+    # x = torch.randn(4, 3, 224, 224)
+    # y = vae(x)
+    # print(y.shape)
+    # pass
