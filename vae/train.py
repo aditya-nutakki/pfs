@@ -24,7 +24,7 @@ class VanillaVAE(nn.Module):
 
         modules = []
         if hidden_dims is None:
-            hidden_dims = [32, 64, 128, 256, 512]
+            hidden_dims = [32, 64, 128, 256, 512, 512]
 
         # Build Encoder
         for h_dim in hidden_dims:
@@ -148,7 +148,7 @@ class VanillaVAE(nn.Module):
         log_var = args[3]
         
         recons_loss =F.mse_loss(recons, input, reduction="sum")
-        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
+        kld_loss = torch.sum(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
 
         loss = recons_loss + self.kld_weight * kld_loss
         return {'loss': loss, 'Reconstruction_Loss':recons_loss.detach(), 'KLD':-kld_loss.detach()}
@@ -188,7 +188,8 @@ def eval(ep, num_samples = 32):
     model.eval()
     print("Evaluating ...")
     with torch.no_grad():
-        for i, (images, labels) in enumerate(loader):
+        # for i, (images, labels) in enumerate(loader):
+        for i, images in enumerate(loader):
             images = images.to(device)
             preds, input, mu, log_var = model(images)
             ts.save(preds, f"./recons_{ep}_{i}.jpg")
@@ -212,7 +213,8 @@ def train():
         model.train()
         losses = []
 
-        for i, (images, labels) in enumerate(loader):
+        # for i, (images, labels) in enumerate(loader):
+        for i, images in enumerate(loader):
             opt.zero_grad()
 
             images = images.to(device)
@@ -241,7 +243,7 @@ def train():
 
 
 # model = VanillaVAE(in_channels = 3, latent_dim = 24, hidden_dims=[16, 32, 64, 32, 32])
-model = VanillaVAE(in_channels = 3, latent_dim = 512, kld_weight = 0.05)
+model = VanillaVAE(in_channels = 3, latent_dim = 512, kld_weight = 0.75)
 model = model.to(device)
 
 # loader = DataLoader(ds, batch_size=32, shuffle=True, num_workers=2)
@@ -252,17 +254,17 @@ model = model.to(device)
 #                         transforms.ToTensor()
 #                         ]))
 
-dataset = CIFAR10(root="./", download=True,
-                        transform=transforms.Compose([
-                        transforms.Resize((64,64)), # or h
-                        transforms.ToTensor()
-                        ]))
+# dataset = CIFAR10(root="./", download=True,
+#                         transform=transforms.Compose([
+#                         transforms.Resize((64,64)), # or h
+#                         transforms.ToTensor()
+#                         ]))
 
-loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=2)
+# loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=2)
 
 
 
-# loader = CLIPDataset("/mnt/d/work/datasets/faces/Humans", img_sz = 64)
-# loader = DataLoader(loader, batch_size = 32, shuffle=True, num_workers=2)
+loader = BikesDataset("/mnt/d/work/datasets/bikes/white_bg", img_sz = 128, limit = -1)
+loader = DataLoader(loader, batch_size = 24, shuffle=True, num_workers=2)
 train()
 
