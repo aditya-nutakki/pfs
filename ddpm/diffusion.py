@@ -2,7 +2,8 @@ import torch.nn as nn
 import torch, torchvision
 import torch.nn.functional as F
 import os, numpy, json
-from modules import UNet
+# from unet_time import UNet
+from unet_attn import UNet
 import torchshow
 from time import time
 
@@ -18,8 +19,8 @@ class DiffusionModel(nn.Module):
     def __init__(self, time_steps, 
                  beta_start = 10e-4, 
                  beta_end = 0.02,
-                 image_dims = diffusion_model_dims,
-                 output_channels = 3):
+                 image_dims = image_dims,
+                 output_channels = 1):
         
         super().__init__()
         self.time_steps = time_steps
@@ -33,7 +34,7 @@ class DiffusionModel(nn.Module):
         self.alphas = 1 - self.betas
         self.alpha_hats = torch.cumprod(self.alphas, dim = -1)
 
-        self.model = UNet(input_channels = c, output_channels = output_channels, num_steps = self.time_steps, down_factor = 1)
+        self.model = UNet(input_channels = c, output_channels = output_channels, time_steps = self.time_steps, down_factor = 1)
 
 
     def sample(self, ep, num_samples = batch_size):
@@ -75,10 +76,10 @@ class DiffusionModel(nn.Module):
 
 def train_ddpm(time_steps = time_steps, epochs = epochs):
     ddpm = DiffusionModel(time_steps = time_steps)
-    c, h, w = diffusion_model_dims
+    c, h, w = image_dims
     assert h == w, f"height and width must be same, got {h} as height and {w} as width"
 
-    loader = get_dataloader(dataset_type="cifar", img_sz = h, batch_size = batch_size)
+    loader = get_dataloader(dataset_type="mnist", img_sz = h, batch_size = batch_size)
 
     opt = torch.optim.Adam(ddpm.model.parameters(), lr = lr)
     criterion = nn.MSELoss(reduction="mean")
@@ -95,9 +96,9 @@ def train_ddpm(time_steps = time_steps, epochs = epochs):
             bs = x.shape[0]
             x = x.to(device)
             ts = torch.randint(low = 1, high = ddpm.time_steps, size = (bs, ), device = device)
-                        
+
             x, target_noise = ddpm.add_noise(x, ts)
-            
+            # print(x.shape, target_noise.shape)
             # print(x.shape)
             predicted_noise = ddpm.model(x, ts)
             loss = criterion(target_noise, predicted_noise)
@@ -114,7 +115,7 @@ def train_ddpm(time_steps = time_steps, epochs = epochs):
         ftime = time()
         print(f"Epoch trained in {ftime - stime}s; Avg loss => {sum(losses)/len(losses)}")
 
-        if (ep + 5) % 1 == 0:
+        if (ep + 1) % 1 == 0:
             ddpm.sample(ep)
         
         print()
