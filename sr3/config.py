@@ -1,6 +1,6 @@
 # only parameters to be in this file
 
-img_sz = 32
+img_sz = 128
 
 image_dims = (3, img_sz, img_sz) # c, h, w
 starting_filters = 64

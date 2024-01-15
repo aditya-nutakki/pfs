@@ -50,28 +50,44 @@ class DiffusionModel(nn.Module):
         self.alphas = 1 - self.betas
         self.alpha_hats = torch.cumprod(self.alphas, dim = -1)
 
-        self.model = UNet(input_channels =  c, output_channels = output_channels, time_steps = self.time_steps, down_factor = 1)
+        self.model = UNet(input_channels =  2*c, output_channels = output_channels, time_steps = self.time_steps, down_factor = 1)
 
 
     def sample(self, ep, num_samples = batch_size):
         # reverse process
         self.model.eval()
+        c, h, w = image_dims
 
         print(f"Sampling {num_samples} samples...")
         stime = time()
         with torch.no_grad():
-            x = torch.randn(num_samples, self.input_channels, self.img_size, self.img_size, device = device)
-            for i, t in enumerate(range(self.time_steps - 1, 0 , -1)):
-                alpha_t, alpha_t_hat, beta_t = self.alphas[t], self.alpha_hats[t], self.betas[t]
-                # print(alpha_t, alpha_t_hat, beta_t)
-                t = torch.tensor(t, device = device).long()
+            loader = get_dataloader(dataset_type="sr", img_sz = h, batch_size = num_samples)
+
+            for (hr_img, lr_img) in loader:
                 
-                x = (torch.sqrt(1/alpha_t))*(x - (1-alpha_t)/torch.sqrt(1 - alpha_t_hat) * self.model(x, alpha_t_hat.view(-1).to(device)))
-                if i > 1:
-                    noise = torch.randn_like(x)
-                    x = x + torch.sqrt(beta_t) * noise
+                ts.save(lr_img, os.path.join(img_save_dir, f"lr_img.jpeg"))
+                ts.save(hr_img, os.path.join(img_save_dir, f"hr_img.jpeg"))
+
+                x = torch.randn(num_samples, self.input_channels, self.img_size, self.img_size).to(device)
+                lr_img = lr_img.to(device)
+
+                for i, t in enumerate(range(self.time_steps - 1, 0 , -1)):
+                    alpha_t, alpha_t_hat, beta_t = self.alphas[t], self.alpha_hats[t], self.betas[t]
+                    # print(alpha_t, alpha_t_hat, beta_t)
+                    t = torch.tensor(t, device = device).long()
+                    pred_noise = self.model(torch.cat([x, lr_img], dim = 1).to(device), alpha_t_hat.view(-1).to(device))
+                    # pred_noise = self.model(torch.cat([lr_img, x], dim = 1).to(device), alpha_t_hat.view(-1).to(device))
+                    x = (torch.sqrt(1/alpha_t))*(x - (1-alpha_t)/torch.sqrt(1 - alpha_t_hat) * pred_noise)
+                
+
+                    if i > 1:
+                        noise = torch.randn_like(x)
+                        x = x + torch.sqrt(beta_t) * noise
+                
+                break
+
         ftime = time()
-        torchshow.save(x, os.path.join(img_save_dir, f"sample_{ep}.jpeg"))
+        torchshow.save(x, os.path.join(img_save_dir, f"sr_sample.jpeg"))
         print(f"Done denoising in {ftime - stime}s ")
 
 
@@ -96,11 +112,12 @@ def train_ddpm(time_steps = time_steps, epochs = epochs):
     c, h, w = image_dims
     assert h == w, f"height and width must be same, got {h} as height and {w} as width"
 
-    loader = get_dataloader(dataset_type="cifar", img_sz = h, batch_size = batch_size)
+    loader = get_dataloader(dataset_type="sr", img_sz = h, batch_size = batch_size)
 
     opt = torch.optim.Adam(ddpm.model.parameters(), lr = lr)
     criterion = nn.MSELoss(reduction="mean")
 
+    ddpm.load_state_dict(torch.load("./models/sr_ep_7_64x128.pt"))
     ddpm.model.to(device)
     for ep in range(epochs):
         ddpm.model.train()
@@ -109,15 +126,20 @@ def train_ddpm(time_steps = time_steps, epochs = epochs):
         stime = time()
         
         # for i, x in enumerate(loader):
-        for i, (x, _) in enumerate(loader):
+        for i, (x, y) in enumerate(loader):
+            
+            # x is highres target image, y is low res image to which is to be conditioned
+            
             bs = x.shape[0]
-            x = x.to(device)
-            # ts = torch.randint(low = 1, high = ddpm.time_steps, size = (bs, ), device = device) # init t's
+            x, y = x.to(device), y.to(device)
+            
+
             ts = torch.randint(low = 1, high = ddpm.time_steps, size = (bs, ))
             gamma = ddpm.alpha_hats[ts].to(device)
             ts = ts.to(device = device)
 
             x, target_noise = ddpm.add_noise(x, ts)
+            x = torch.cat([x, y], dim = 1)
             # print(x.shape, target_noise.shape)
             # print(x.shape)
             predicted_noise = ddpm.model(x, gamma)
@@ -136,17 +158,29 @@ def train_ddpm(time_steps = time_steps, epochs = epochs):
         ftime = time()
         print(f"Epoch trained in {ftime - stime}s; Avg loss => {sum(losses)/len(losses)}")
 
-        if (ep + 3) % 4 == 0:
-            ddpm.sample(ep)
-            torch.save(ddpm.state_dict(), os.path.join(model_save_dir, f"ep_{ep}.pt"))
+        if (ep + 3) % 1 == 0:
+            # ddpm.sample(ep)
+            torch.save(ddpm.state_dict(), os.path.join(model_save_dir, f"sr_ep_{ep}_32x128.pt"))
         print()
             
+
+def eval(num_samples = batch_size):
+    ddpm = DiffusionModel(time_steps = time_steps)
+    # ddpm.load_state_dict(torch.load(os.path.join(model_save_dir, "sr_ep_7_64x128.pt")))
+    ddpm.load_state_dict(torch.load(os.path.join(model_save_dir, "sr_ep_2_32x128.pt")))
+    ddpm = ddpm.to(device)
+    c, h, w = image_dims
+    assert h == w, f"height and width must be same, got {h} as height and {w} as width"
+    print(f"Loaded model, trying to sample !")
+
+    ddpm.sample(ep = 8, num_samples=num_samples)
 
 
 
 if __name__ == "__main__":
     time_steps = 1000
     train_ddpm(time_steps = time_steps)
+    eval(4)
 
     # timesteps = 100
     # beta_start, beta_end = 10e-4, 0.02
