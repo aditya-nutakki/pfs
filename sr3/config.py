@@ -10,12 +10,16 @@ time_steps = 1000
 device = "cuda"
 batch_size = 24
 epochs = 10000
-lr = 1e-3
+lr = 5e-4
+
+hr_sz, lr_sz = 128, 16
+
 dataset_path = "/mnt/d/work/datasets/bikes/bikes_clean"
 
-model_save_dir = "./models"
-img_save_dir = "./samples"
-metrics_save_dir = "./metrics"
+exp_name = "celeba"
+model_save_dir = f"./{exp_name}_models"
+img_save_dir = f"./{exp_name}_samples"
+metrics_save_dir = f"./{exp_name}_metrics"
 
 use_ddim_sampling = False
 

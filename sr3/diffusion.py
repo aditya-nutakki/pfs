@@ -140,14 +140,17 @@ def train_ddpm(time_steps = time_steps, epochs = epochs):
     c, h, w = image_dims
     assert h == w, f"height and width must be same, got {h} as height and {w} as width"
 
-    loader = get_dataloader(dataset_type="sr", img_sz = h, batch_size = batch_size)
+    loader = get_dataloader(hr_sz = hr_sz, lr_sz = lr_sz, batch_size = batch_size)
 
     opt = torch.optim.Adam(ddpm.model.parameters(), lr = lr)
     criterion = nn.MSELoss(reduction="mean")
 
-    ddpm.load_state_dict(torch.load("./models/sr_ep_7_64x128.pt"))
+    # ddpm.load_state_dict(torch.load("./celeba_models/celeba_sr_ep_9_32x128_t2000.pt"))
+    ddpm.load_state_dict(torch.load("./celeba_models/celeba_sr_ep_57_16x128_t2000.pt"))
+    
     ddpm.model.to(device)
-    for ep in range(epochs):
+    offset = 58
+    for ep in range(offset, epochs + offset):
         ddpm.model.train()
         print(f"Epoch {ep}:")
         losses = []
@@ -181,14 +184,14 @@ def train_ddpm(time_steps = time_steps, epochs = epochs):
 
             if i % 250 == 0:
                 print(f"Loss: {loss.item()}; step {i}; epoch {ep}")
-                
+
 
         ftime = time()
         print(f"Epoch trained in {ftime - stime}s; Avg loss => {sum(losses)/len(losses)}")
 
-        if (ep + 3) % 1 == 0:
+        if ep % 1 == 0:
             # ddpm.sample(ep)
-            torch.save(ddpm.state_dict(), os.path.join(model_save_dir, f"sr_ep_{ep}_32x128.pt"))
+            torch.save(ddpm.state_dict(), os.path.join(model_save_dir, f"celeba_sr_ep_{ep}_{lr_sz}x{hr_sz}_t{time_steps}.pt"))
         print()
             
 
@@ -217,9 +220,9 @@ def eval(num_samples = batch_size):
 
 
 if __name__ == "__main__":
-    time_steps = 1000
-    # train_ddpm(time_steps = time_steps)
-    eval(4)
+    time_steps = 2000
+    train_ddpm(time_steps = time_steps)
+    # eval(4)
 
     # timesteps = 100
     # beta_start, beta_end = 10e-4, 0.02

@@ -119,7 +119,7 @@ class BikesDataset(Dataset):
 
 
 class SRDataset(Dataset):
-    def __init__(self, dataset_path, limit = -1, _transforms = None, hr_sz = 128, lr_sz = 64) -> None:
+    def __init__(self, dataset_path, limit = -1, _transforms = None, hr_sz = 128, lr_sz = 32) -> None:
         super().__init__()
         
         self.transforms = _transforms
@@ -180,33 +180,30 @@ class SRDataset(Dataset):
 
 
 
-def get_dataloader(dataset_type = "", batch_size = 8, img_sz = 128, limit = -1):
+def get_dataloader(batch_size = 8, hr_sz = 128, lr_sz = 32, limit = -1):
 
-    if dataset_type == "mnist":
-        ds = MNIST(root="./datasets", download=True,
-                        transform=transforms.Compose([
-                        transforms.Resize(img_sz), # or h
-                        transforms.ToTensor(),
-                        NormalizeToRange(-1, 1)
-                        ])) 
+    # if dataset_type == "mnist":
+    #     ds = MNIST(root="./datasets", download=True,
+    #                     transform=transforms.Compose([
+    #                     transforms.Resize(img_sz), # or h
+    #                     transforms.ToTensor(),
+    #                     NormalizeToRange(-1, 1)
+    #                     ])) 
         
-    elif dataset_type == "cifar":
-        ds = CIFAR10(root="./datasets", download=True,
-                        transform=transforms.Compose([
-                        transforms.Resize(img_sz),
-                        transforms.ToTensor(),
-                        NormalizeToRange(-1, 1)
-                        ])) 
+    # elif dataset_type == "cifar":
+    #     ds = CIFAR10(root="./datasets", download=True,
+    #                     transform=transforms.Compose([
+    #                     transforms.Resize(img_sz),
+    #                     transforms.ToTensor(),
+    #                     NormalizeToRange(-1, 1)
+    #                     ])) 
     
     
-    elif dataset_type == "sr":
-        ds = SRDataset("/mnt/d/work/datasets/nature/x128/all", hr_sz=128, lr_sz=32)
 
-    else:
-        ds = BikesDataset(dataset_path, img_sz = img_sz, limit = limit)
+    ds = SRDataset("/mnt/d/work/datasets/celebA", hr_sz = hr_sz, lr_sz = lr_sz)
     
-    print(f"Training on {len(ds)} samples; with batch size {batch_size}; image dims {image_dims} ...")
-    return DataLoader(ds, batch_size = batch_size, shuffle = True, drop_last = True)
+    print(f"Training on {len(ds)} samples; with batch size {batch_size}; image dims {image_dims}; hr_sz {hr_sz}; lr_sz {lr_sz} ...")
+    return DataLoader(ds, batch_size = batch_size, shuffle = True, drop_last = True, num_workers = 4)
 
 
 def plot_metrics(losses, title, save_path = None, x_label = "steps", y_label = "loss"):
