@@ -5,7 +5,7 @@ img_sz = 128
 image_dims = (3, img_sz, img_sz) # c, h, w
 starting_filters = 64
 
-time_steps = 1000
+time_steps = 2000
 
 device = "cuda"
 batch_size = 24

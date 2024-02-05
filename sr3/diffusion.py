@@ -53,9 +53,12 @@ class DiffusionModel(nn.Module):
         self.model = UNet(input_channels =  2*c, output_channels = output_channels, time_steps = self.time_steps, down_factor = 1)
 
 
-    def ddim_sample(self, lr_img, sample_steps = 500, num_samples = 16, eta = 0.0, title = None):
-        assert sample_steps < self.time_steps, f"sampling steps should be lesser than number of time steps"
+    def ddim_sample(self, lr_img, sample_steps = 500, eta = 0.0, title = None):
+        assert sample_steps <= self.time_steps, f"sampling steps should be lesser than number of time steps"
         
+        # lr_img to be a 4D tensor
+
+        num_samples = lr_img.shape[0] 
         self.model.eval()
         print(f"sampling {num_samples} examples with ddim sampling ... ")
 
@@ -68,7 +71,7 @@ class DiffusionModel(nn.Module):
             x = torch.randn(num_samples, self.input_channels, self.img_size, self.img_size, device = device)
             lr_img = lr_img.to(device)
             stime = time()
-            print(x.shape)
+            # print(x.shape)
             for t, t_minus_one in time_pairs:
                 # noise = torch.randn(num_samples, *self.latent_image_dims, device = device)
                 noise = torch.randn(num_samples, self.input_channels, self.img_size, self.img_size, device = device)
@@ -86,16 +89,16 @@ class DiffusionModel(nn.Module):
 
             ftime = time()
             print(f"Done denoising in {ftime - stime}s ")
-            torchshow.save(x, os.path.join(img_save_dir, f"./sr_ddim_sample.jpeg"))
+            # torchshow.save(x, os.path.join(img_save_dir, f"./sr_ddim_sample_{sample_steps}_18.jpeg"))
         return x
 
 
-    def sample(self, lr_img, num_samples = batch_size):
+    def sample(self, lr_img):
         # reverse process
         self.model.eval()
-        c, h, w = image_dims
-
-        print(f"Sampling {num_samples} samples...")
+        
+        num_samples = lr_img.shape[0]
+        print(f"Normally sampling {num_samples}")
         stime = time()
         with torch.no_grad():
         
@@ -115,8 +118,9 @@ class DiffusionModel(nn.Module):
                     x = x + torch.sqrt(beta_t) * noise
                 
         ftime = time()
-        torchshow.save(x, os.path.join(img_save_dir, f"sr_sample.jpeg"))
+        # torchshow.save(x, os.path.join(img_save_dir, f"sr_sample.jpeg"))
         print(f"Done denoising in {ftime - stime}s ")
+        return x
 
 
     def add_noise(self, x, ts):
@@ -146,10 +150,10 @@ def train_ddpm(time_steps = time_steps, epochs = epochs):
     criterion = nn.MSELoss(reduction="mean")
 
     # ddpm.load_state_dict(torch.load("./celeba_models/celeba_sr_ep_9_32x128_t2000.pt"))
-    ddpm.load_state_dict(torch.load("./celeba_models/celeba_sr_ep_57_16x128_t2000.pt"))
+    ddpm.load_state_dict(torch.load("./celeba_models/celeba_sr_ep_143_16x128_t2000.pt"))
     
     ddpm.model.to(device)
-    offset = 58
+    offset = 144
     for ep in range(offset, epochs + offset):
         ddpm.model.train()
         print(f"Epoch {ep}:")

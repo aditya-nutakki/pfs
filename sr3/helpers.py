@@ -12,8 +12,12 @@ from config import *
 import matplotlib.pyplot as plt
 from random import uniform
 
-import torchshow as ts
+import torchshow
 from torchvision.transforms import InterpolationMode
+import math
+from torchvision.utils import save_image
+
+from PIL import Image
 
 
 # custom normalizing function to get into range you want
@@ -26,25 +30,13 @@ class NormalizeToRange(nn.Module):
     def __call__(self, images):
         # images could be a batch or individual
         
-        # _min_val, _max_val = torch.min(images), torch.max(images)
-        # return (self.max_val - self.min_val) * ((images - _min_val) / (_max_val - _min_val)) + self.min_val
-        return (self.max_val - self.min_val) * ((images - 0) / (1)) + self.min_val
+        _min_val, _max_val = torch.min(images), torch.max(images)
+        return (self.max_val - self.min_val) * ((images - _min_val) / (_max_val - _min_val)) + self.min_val
+        # return (self.max_val - self.min_val) * ((images - 0) / (1)) + self.min_val
     
 
 
-os.makedirs(metrics_save_dir, exist_ok = True)
-
-# custom normalizing function to get into range you want
-class NormalizeToRange(nn.Module):
-    def  __init__(self, min_val, max_val) -> None:
-        super().__init__()
-        self.min_val = min_val
-        self.max_val = max_val
-
-    def __call__(self, images):
-        # images could be a batch or individual
-        return (self.max_val - self.min_val) * ((images - 0) / (1)) + self.min_val
-    
+os.makedirs(metrics_save_dir, exist_ok = True)    
 
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1., p = 0.2):
@@ -119,10 +111,11 @@ class BikesDataset(Dataset):
 
 
 class SRDataset(Dataset):
-    def __init__(self, dataset_path, limit = -1, _transforms = None, hr_sz = 128, lr_sz = 32) -> None:
+    def __init__(self, dataset_path, limit = -1, _transforms = None, hr_sz = 128, lr_sz = 32, return_img_path = False) -> None:
         super().__init__()
         
         self.transforms = _transforms
+        self.return_img_path = return_img_path
         
         if not self.transforms:
             self.transforms = transforms.Compose([
@@ -176,31 +169,16 @@ class SRDataset(Dataset):
         image = self.transforms(image)
         hr_image, lr_image = self.hr_sz(image), self.lr_sz(image)
 
+        if self.return_img_path:
+            return hr_image, self.hr_sz(lr_image), self.images[index].split("/")[-1]
+
         return hr_image, self.hr_sz(lr_image)
 
 
 
-def get_dataloader(batch_size = 8, hr_sz = 128, lr_sz = 32, limit = -1):
+def get_dataloader(path = "/mnt/d/work/datasets/celebA", batch_size = 8, hr_sz = 128, lr_sz = 32, return_img_path = False,limit = -1):
 
-    # if dataset_type == "mnist":
-    #     ds = MNIST(root="./datasets", download=True,
-    #                     transform=transforms.Compose([
-    #                     transforms.Resize(img_sz), # or h
-    #                     transforms.ToTensor(),
-    #                     NormalizeToRange(-1, 1)
-    #                     ])) 
-        
-    # elif dataset_type == "cifar":
-    #     ds = CIFAR10(root="./datasets", download=True,
-    #                     transform=transforms.Compose([
-    #                     transforms.Resize(img_sz),
-    #                     transforms.ToTensor(),
-    #                     NormalizeToRange(-1, 1)
-    #                     ])) 
-    
-    
-
-    ds = SRDataset("/mnt/d/work/datasets/celebA", hr_sz = hr_sz, lr_sz = lr_sz)
+    ds = SRDataset(path, hr_sz = hr_sz, lr_sz = lr_sz, return_img_path = return_img_path)
     
     print(f"Training on {len(ds)} samples; with batch size {batch_size}; image dims {image_dims}; hr_sz {hr_sz}; lr_sz {lr_sz} ...")
     return DataLoader(ds, batch_size = batch_size, shuffle = True, drop_last = True, num_workers = 4)
@@ -216,6 +194,41 @@ def plot_metrics(losses, title, save_path = None, x_label = "steps", y_label = "
         save_path = os.path.join(metrics_save_dir, f"{title}.jpeg")
     plt.savefig(save_path)
     plt.close()
+
+
+def gaussian(window_size, sigma):
+    """
+    Generates a list of Tensor values drawn from a gaussian distribution with standard
+    diviation = sigma and sum of all elements = 1.
+
+    Length of list = window_size
+    """    
+    gauss =  torch.Tensor([math.exp(-(x - window_size//2)**2/float(2*sigma**2)) for x in range(window_size)])
+    return gauss/gauss.sum()
+
+
+def create_window(window_size, channel = 1):
+
+    # Generate an 1D tensor containing values sampled from a gaussian distribution
+    _1d_window = gaussian(window_size=window_size, sigma=1.5).unsqueeze(1)
+    
+    # Converting to 2D  
+    _2d_window = _1d_window.mm(_1d_window.t()).float().unsqueeze(0).unsqueeze(0)     
+    window = torch.Tensor(_2d_window.expand(channel, 1, window_size, window_size).contiguous())
+
+    return window
+
+
+
+def save_images(images, save_path = "./", title = "sample"):
+    print("saving images ...")
+    ntr = NormalizeToRange(0, 1)
+    for i, image in enumerate(images):
+        # torchshow.save(image, os.path.join(save_path, f"{title[i]}.jpeg"))
+        image = ntr(image)
+        save_image(image, os.path.join(save_path, title[i]))
+
+
 
 
 if __name__ == "__main__":
